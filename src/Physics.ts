@@ -71,4 +71,8 @@ export class Physics {
   beforeUpdate(handler: () => void) {
     Matter.Events.on(this.engine, 'beforeUpdate', handler);
   }
+
+  afterUpdate(handler: () => void) {
+    Matter.Events.on(this.engine, 'afterUpdate', handler);
+  }
 }

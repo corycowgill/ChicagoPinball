@@ -18,12 +18,24 @@ export class Flipper {
   private restAngle: number;
   private activeAngle: number;
   private side: FlipperSide;
+  /** Authoritative angle. The body's `angle` is forced to this value every
+   *  beforeUpdate AND afterUpdate so neither gravity nor constraint impulse
+   *  resolution can move it off. */
+  private currentAngle: number;
+  private pivotX: number;
+  private pivotY: number;
+  /** Per-step rotation rate for kick / return. */
+  private readonly kickStep = FLIPPER_KICK_VEL;
+  private readonly returnStep = FLIPPER_RETURN_VEL;
 
   /** pivotX/pivotY is the world-space hinge point. */
   constructor(side: FlipperSide, pivotX: number, pivotY: number) {
     this.side = side;
+    this.pivotX = pivotX;
+    this.pivotY = pivotY;
     this.restAngle = side === 'left' ? FLIPPER_REST_ANGLE : Math.PI - FLIPPER_REST_ANGLE;
     this.activeAngle = side === 'left' ? FLIPPER_ACTIVE_ANGLE : Math.PI - FLIPPER_ACTIVE_ANGLE;
+    this.currentAngle = this.restAngle;
 
     // Place body so its LEFT end (local x = -half) sits on the pivot when at restAngle.
     const half = FLIPPER_LEN / 2;
@@ -40,6 +52,10 @@ export class Flipper {
     });
     Matter.Body.setAngle(this.body, this.restAngle);
 
+    // The pivot constraint is still useful as a backup for ball-vs-flipper
+    // collision response (so the constraint solver knows the flipper has a
+    // hinge), but with the kinematic enforcement below it normally has nothing
+    // to correct.
     this.pivot = Matter.Constraint.create({
       pointA: { x: pivotX, y: pivotY },
       bodyB: this.body,
@@ -54,46 +70,56 @@ export class Flipper {
     this.active = v;
   }
 
-  /** Called every physics step (in beforeUpdate) to enforce angle clamp + kick. */
-  tick() {
-    const angle = this.body.angle;
-    const target = this.active ? this.activeAngle : this.restAngle;
+  /** Snap the body to the authoritative angle/position with consistent
+   *  velocity bookkeeping. Called from both beforeUpdate and afterUpdate. */
+  private commit(angularVel: number) {
+    const half = FLIPPER_LEN / 2;
+    const px = this.pivotX + Math.cos(this.currentAngle) * half;
+    const py = this.pivotY + Math.sin(this.currentAngle) * half;
+    // Order matters: setPosition / setAngle update vertices but not *Prev.
+    // Then setVelocity / setAngularVelocity update *Prev so Verlet integration
+    // reproduces the requested velocities (rather than computing phantom ones
+    // from the difference between the snapped pose and the last frame's pose).
+    Matter.Body.setPosition(this.body, { x: px, y: py });
+    Matter.Body.setAngle(this.body, this.currentAngle);
+    // Linear velocity at the body's centre = ω × r, where r is body-centre
+    // relative to pivot. Needed so a ball hit during a flip gets the right
+    // tangential impulse.
+    const rx = px - this.pivotX;
+    const ry = py - this.pivotY;
+    Matter.Body.setVelocity(this.body, { x: -angularVel * ry, y: angularVel * rx });
+    Matter.Body.setAngularVelocity(this.body, angularVel);
+  }
 
-    if (this.side === 'left') {
-      if (this.active) {
-        if (angle > target) {
-          // Need to rotate up (negative angle direction).
-          Matter.Body.setAngularVelocity(this.body, -FLIPPER_KICK_VEL);
-        } else {
-          Matter.Body.setAngularVelocity(this.body, 0);
-          Matter.Body.setAngle(this.body, target);
-        }
-      } else {
-        if (angle < target) {
-          Matter.Body.setAngularVelocity(this.body, FLIPPER_RETURN_VEL);
-        } else {
-          Matter.Body.setAngularVelocity(this.body, 0);
-          Matter.Body.setAngle(this.body, target);
-        }
-      }
+  /** Step the authoritative angle toward its current target by at most one
+   *  per-frame increment, and write the resulting kinematic state to the body. */
+  tick() {
+    const target = this.active ? this.activeAngle : this.restAngle;
+    const step = this.active ? this.kickStep : this.returnStep;
+    const diff = target - this.currentAngle;
+    let angularVel = 0;
+    if (Math.abs(diff) <= step) {
+      this.currentAngle = target;
     } else {
-      // Right flipper rotates the opposite way; its "active" angle has higher numeric value.
-      if (this.active) {
-        if (angle < target) {
-          Matter.Body.setAngularVelocity(this.body, FLIPPER_KICK_VEL);
-        } else {
-          Matter.Body.setAngularVelocity(this.body, 0);
-          Matter.Body.setAngle(this.body, target);
-        }
-      } else {
-        if (angle > target) {
-          Matter.Body.setAngularVelocity(this.body, -FLIPPER_RETURN_VEL);
-        } else {
-          Matter.Body.setAngularVelocity(this.body, 0);
-          Matter.Body.setAngle(this.body, target);
-        }
-      }
+      const dir = Math.sign(diff);
+      this.currentAngle += dir * step;
+      angularVel = dir * step;
     }
+    this.commit(angularVel);
+  }
+
+  /** Re-apply the authoritative pose after the engine integrates, so any
+   *  drift from gravity or contact resolution during the step is undone before
+   *  the frame is rendered. */
+  enforce() {
+    // Same target as last beforeUpdate — angle has already been advanced. Just
+    // re-pin the body to it without further angular advancement.
+    const angularVel = this.currentAngle === (this.active ? this.activeAngle : this.restAngle)
+      ? 0
+      : (this.active ? this.kickStep : this.returnStep) * Math.sign(
+          (this.active ? this.activeAngle : this.restAngle) - this.currentAngle,
+        );
+    this.commit(angularVel);
   }
 
   draw(ctx: CanvasRenderingContext2D) {

@@ -12,8 +12,12 @@ export const FLIPPER_LEN = 92;
 export const FLIPPER_HEIGHT = 16;
 export const FLIPPER_REST_ANGLE = 0.42;        // ~24 deg below horizontal
 export const FLIPPER_ACTIVE_ANGLE = -0.42;     // ~24 deg above horizontal
-export const FLIPPER_KICK_VEL = 0.85;          // angular velocity on activate
-export const FLIPPER_RETURN_VEL = 0.45;
+// Per-frame angle increment in radians (we drive the flipper kinematically
+// rather than letting the physics integrator do it). At 60 fps the kick step
+// of 0.18 rad means a full 0.84-rad swing in ~5 frames ≈ 80 ms — snappy but
+// not a single-frame teleport. Return is slower for a more "sproingy" feel.
+export const FLIPPER_KICK_VEL = 0.18;
+export const FLIPPER_RETURN_VEL = 0.10;
 
 export const PLUNGER_MAX_PULL = 110;
 export const PLUNGER_KICK = 0.045;             // force when fully released

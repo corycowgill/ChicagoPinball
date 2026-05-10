@@ -165,6 +165,14 @@ export class Playfield {
       }
     });
 
+    // Re-pin the flippers AFTER integration too, so any drift introduced by
+    // gravity, contact resolution, or constraint impulse during the step is
+    // erased before the renderer reads the body's pose.
+    physics.afterUpdate(() => {
+      this.leftFlipper.enforce();
+      this.rightFlipper.enforce();
+    });
+
     // Collision routing
     physics.on('bean', (_self, other) => {
       if (other.label === 'ball') {

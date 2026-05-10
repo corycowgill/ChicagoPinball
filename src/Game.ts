@@ -7,7 +7,8 @@ import { STARTING_BALLS, COLOR, PLAYFIELD_W } from './constants';
 
 export class Game {
   private physics!: Physics;
-  private playfield!: Playfield;
+  /** Public for headless tests to read body angles. Treat as read-only. */
+  playfield!: Playfield;
   private renderer = new Renderer();
   private input = new InputManager();
 

@@ -12,6 +12,10 @@ canvas.height = PLAYFIELD_H * dpr;
 ctx.scale(dpr, dpr);
 
 const game = new Game(ctx, canvas);
+// Test hook: expose flipper bodies for headless angle sampling. No-op in
+// production beyond a small property write — the bodies aren't enumerable in
+// the UI.
+(window as unknown as { __pinball?: unknown }).__pinball = game;
 
 // Fixed-timestep loop with accumulator.
 const STEP_MS = 1000 / 60;
