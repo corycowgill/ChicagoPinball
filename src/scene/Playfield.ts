@@ -43,29 +43,43 @@ export class Playfield {
   readonly launchX = PLAYFIELD_W - 27;
   readonly launchRestY = PLAYFIELD_H - 90;
 
+  /** The play area excludes the launch lane on the right (which lives at
+   *  x ∈ [W-56, W]). Everything in the bottom apparatus — flippers, slingshots,
+   *  inlanes, outlanes — mirrors about this center, not the canvas center,
+   *  so the right side isn't squeezed against the launch lane. */
+  readonly playRight = PLAYFIELD_W - 56;
+  readonly playCenter = (PLAYFIELD_W - 56) / 2;
+
   constructor(private physics: Physics, private events: PlayfieldEvents) {
     this.buildWalls();
 
     this.ball = new Ball(this.launchX, this.launchRestY);
     physics.add(this.ball.body);
 
-    // Flippers — pivot offset 102 px from center gives a tip gap of ~36 px,
-    // wider than the 22 px ball so a missed ball drains cleanly.
+    // Flippers — pivot offset 102 px from PLAY CENTER (not canvas center) so
+    // the layout is mirror-symmetric across the visible play area.
     const flipperY = PLAYFIELD_H - 130;
     const flipperGap = 102;
-    this.leftFlipper = new Flipper('left', PLAYFIELD_W / 2 - flipperGap, flipperY);
-    this.rightFlipper = new Flipper('right', PLAYFIELD_W / 2 + flipperGap, flipperY);
+    this.leftFlipper = new Flipper('left', this.playCenter - flipperGap, flipperY);
+    this.rightFlipper = new Flipper('right', this.playCenter + flipperGap, flipperY);
     physics.add(this.leftFlipper.body, this.leftFlipper.pivot);
     physics.add(this.rightFlipper.body, this.rightFlipper.pivot);
 
-    // Slingshots above flippers
+    // Slingshots above flippers — mirrored about playCenter. Each is a right
+    // triangle with the right-angle in the outer corner and the hypotenuse
+    // facing the flipper tip, so a ball coming down past the bumpers gets
+    // redirected inward toward the flipper.
     const slingY = flipperY - 18;
+    const slingOuterLeft = 36;
+    const slingOuterRight = 2 * this.playCenter - slingOuterLeft;
+    const slingInnerLeft = this.playCenter - (flipperGap - 12);
+    const slingInnerRight = 2 * this.playCenter - slingInnerLeft;
     this.slingshots.push(
       new Slingshot(
         [
-          { x: 70, y: slingY - 70 },
-          { x: 70, y: slingY + 28 },
-          { x: 152, y: slingY + 30 },
+          { x: slingOuterLeft, y: slingY - 70 },
+          { x: slingOuterLeft, y: slingY + 28 },
+          { x: slingInnerLeft, y: slingY + 30 },
         ],
         this.normalize({ x: 0.85, y: -0.5 }),
       ),
@@ -73,9 +87,9 @@ export class Playfield {
     this.slingshots.push(
       new Slingshot(
         [
-          { x: PLAYFIELD_W - 70, y: slingY - 70 },
-          { x: PLAYFIELD_W - 70, y: slingY + 28 },
-          { x: PLAYFIELD_W - 152, y: slingY + 30 },
+          { x: slingOuterRight, y: slingY - 70 },
+          { x: slingOuterRight, y: slingY + 28 },
+          { x: slingInnerRight, y: slingY + 30 },
         ],
         this.normalize({ x: -0.85, y: -0.5 }),
       ),
@@ -126,11 +140,11 @@ export class Playfield {
     this.plunger = new Plunger(plungerCx, PLAYFIELD_H - 60, plungerW);
     physics.add(this.plunger.body);
 
-    // Drain sensor (full width thin strip just below flippers)
+    // Drain sensor — only inside the play area (excludes the launch lane).
     this.drainSensor = Matter.Bodies.rectangle(
-      PLAYFIELD_W / 2,
+      this.playCenter,
       PLAYFIELD_H - 4,
-      PLAYFIELD_W - 70,
+      this.playRight - 12,
       6,
       { isStatic: true, isSensor: true, label: 'drain' },
     );
@@ -254,32 +268,42 @@ export class Playfield {
       ),
     );
 
-    // Bottom angled drains (inlanes)
-    const drainAngle = 0.32;
+    // Bottom inlane walls (the angled rails that funnel a ball coming down
+    // past the bumpers in toward the flipper). Mirror-symmetric about the
+    // play-area center (= laneX/2), so the right side doesn't look squeezed
+    // against the launch lane.
+    const drainAngle = 0.42;
+    const inlaneLen = 150;
+    const inlaneCx = 96;                       // left inlane wall center x
+    const inlaneCxRight = laneX - inlaneCx;    // right mirror
+    const inlaneCy = H - 195;
     walls.push(
-      Matter.Bodies.rectangle(80, H - 200, 12, 200, {
+      Matter.Bodies.rectangle(inlaneCx, inlaneCy, 8, inlaneLen, {
         isStatic: true,
         angle: drainAngle,
         label: 'wall',
       }),
     );
     walls.push(
-      Matter.Bodies.rectangle(W - 80 - 60, H - 200, 12, 200, {
+      Matter.Bodies.rectangle(inlaneCxRight, inlaneCy, 8, inlaneLen, {
         isStatic: true,
         angle: -drainAngle,
         label: 'wall',
       }),
     );
 
-    // Bottom outlanes (the small rails outside the slingshots)
+    // Bottom outlane rails (the short verticals just inside the outer wall
+    // on each side of the slingshots). Symmetric about play-center.
+    const outlaneCx = 22;
+    const outlaneCxRight = laneX - outlaneCx;
     walls.push(
-      Matter.Bodies.rectangle(40, H - 240, 8, 180, {
+      Matter.Bodies.rectangle(outlaneCx, H - 240, 6, 180, {
         isStatic: true,
         label: 'wall',
       }),
     );
     walls.push(
-      Matter.Bodies.rectangle(W - 40 - 60, H - 240, 8, 180, {
+      Matter.Bodies.rectangle(outlaneCxRight, H - 240, 6, 180, {
         isStatic: true,
         label: 'wall',
       }),
