@@ -68,8 +68,11 @@ export class Playfield {
     // Slingshots above flippers — mirrored about playCenter. Each is a right
     // triangle with the right-angle in the outer corner and the hypotenuse
     // facing the flipper tip, so a ball coming down past the bumpers gets
-    // redirected inward toward the flipper.
-    const slingY = flipperY - 18;
+    // redirected inward toward the flipper. The inner-bottom vertex MUST sit
+    // above the flipper body at rest — otherwise Matter's first collision
+    // step (which fires once we leave the title screen and start ticking the
+    // engine) shoves the flippers off their rest angles.
+    const slingY = flipperY - 50;
     const slingOuterLeft = 36;
     const slingOuterRight = 2 * this.playCenter - slingOuterLeft;
     const slingInnerLeft = this.playCenter - (flipperGap - 12);
