@@ -9,6 +9,13 @@ interface Toast {
   total: number;
 }
 
+/** Treat the device as touch-first when it has no fine pointer (i.e. no
+ *  mouse) and reports coarse pointer support. matchMedia is evaluated once at
+ *  module load so the UI doesn't flicker if the user hot-plugs a mouse. */
+const IS_TOUCH =
+  typeof window !== 'undefined' &&
+  window.matchMedia?.('(hover: none) and (pointer: coarse)').matches === true;
+
 export class Renderer {
   private toasts: Toast[] = [];
   private flashJackpot = 0;
@@ -237,7 +244,11 @@ export class Renderer {
       ctx.fillStyle = COLOR.TEXT_DIM;
       ctx.font = '10px "Helvetica Neue", Arial, sans-serif';
       ctx.textAlign = 'right';
-      ctx.fillText('Z / ⁄ FLIPPERS', PLAYFIELD_W - 12, 42);
+      ctx.fillText(
+        IS_TOUCH ? 'TAP SIDES TO FLIP' : 'Z / ⁄ FLIPPERS',
+        PLAYFIELD_W - 12,
+        42,
+      );
     }
 
     ctx.restore();
@@ -293,13 +304,23 @@ export class Renderer {
       ctx.shadowBlur = 14;
       ctx.fillStyle = COLOR.NEON_AMBER;
       ctx.font = 'bold 18px "Helvetica Neue", Arial, sans-serif';
-      ctx.fillText('PRESS ENTER TO START', PLAYFIELD_W / 2, 540);
+      ctx.fillText(
+        IS_TOUCH ? 'TAP TO START' : 'PRESS ENTER TO START',
+        PLAYFIELD_W / 2,
+        540,
+      );
     }
 
     ctx.shadowBlur = 0;
     ctx.fillStyle = COLOR.TEXT_DIM;
     ctx.font = '11px "Helvetica Neue", Arial, sans-serif';
-    ctx.fillText('Z / ⁄ flippers · SPACE plunger', PLAYFIELD_W / 2, 580);
+    ctx.fillText(
+      IS_TOUCH
+        ? 'Tap sides to flip · Hold to charge plunger'
+        : 'Z / ⁄ flippers · SPACE plunger',
+      PLAYFIELD_W / 2,
+      580,
+    );
 
     ctx.restore();
   }
@@ -329,7 +350,11 @@ export class Renderer {
       ctx.shadowBlur = 14;
       ctx.fillStyle = COLOR.NEON_CYAN;
       ctx.font = 'bold 16px "Helvetica Neue", Arial, sans-serif';
-      ctx.fillText('PRESS ENTER FOR TITLE', PLAYFIELD_W / 2, 500);
+      ctx.fillText(
+        IS_TOUCH ? 'TAP TO RETURN TO TITLE' : 'PRESS ENTER FOR TITLE',
+        PLAYFIELD_W / 2,
+        500,
+      );
     }
     ctx.restore();
   }
@@ -342,7 +367,12 @@ export class Renderer {
     ctx.shadowBlur = 12;
     ctx.fillStyle = COLOR.NEON_CYAN;
     ctx.font = 'bold 14px "Helvetica Neue", Arial, sans-serif';
-    const msg = holding ? 'RELEASE SPACE TO LAUNCH' : 'HOLD SPACE TO PULL PLUNGER';
+    let msg: string;
+    if (IS_TOUCH) {
+      msg = holding ? 'RELEASE TO LAUNCH' : 'TAP & HOLD TO PULL PLUNGER';
+    } else {
+      msg = holding ? 'RELEASE SPACE TO LAUNCH' : 'HOLD SPACE TO PULL PLUNGER';
+    }
     ctx.fillText(msg, PLAYFIELD_W / 2, PLAYFIELD_H - 40);
     ctx.restore();
   }

@@ -11,7 +11,7 @@ canvas.width = PLAYFIELD_W * dpr;
 canvas.height = PLAYFIELD_H * dpr;
 ctx.scale(dpr, dpr);
 
-const game = new Game(ctx);
+const game = new Game(ctx, canvas);
 
 // Fixed-timestep loop with accumulator.
 const STEP_MS = 1000 / 60;

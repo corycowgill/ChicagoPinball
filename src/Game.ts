@@ -1,9 +1,9 @@
 import { Physics } from './Physics';
 import { Playfield } from './scene/Playfield';
 import { Renderer } from './Renderer';
-import { InputManager } from './InputManager';
+import { InputManager, VirtualKey } from './InputManager';
 import { GameState, ScoreEvent } from './types';
-import { STARTING_BALLS, COLOR } from './constants';
+import { STARTING_BALLS, COLOR, PLAYFIELD_W } from './constants';
 
 export class Game {
   private physics!: Physics;
@@ -17,8 +17,26 @@ export class Game {
   /** Brief delay between ball drain and next ball (ms). */
   private respawnTimer = 0;
 
-  constructor(private ctx: CanvasRenderingContext2D) {
+  constructor(private ctx: CanvasRenderingContext2D, canvas?: HTMLElement) {
     this.rebuildWorld();
+    if (canvas) {
+      this.input.attachPointer(canvas, (x, y) => this.resolveTouchKey(x, y));
+    }
+  }
+
+  /** Map a touch/click at playfield-logical (x, y) to a virtual key. The
+   *  zone depends on the current state: during TITLE/GAME_OVER any tap
+   *  advances; during READY any tap charges the plunger; during PLAYING
+   *  the bottom-right corner is the plunger and left/right halves are
+   *  the flippers. */
+  private resolveTouchKey(x: number, y: number): VirtualKey | null {
+    if (this.state === GameState.TITLE || this.state === GameState.GAME_OVER) {
+      return 'enter';
+    }
+    if (this.state === GameState.READY) return 'plunger';
+    if (this.state === GameState.BALL_DRAINED) return null;
+    // PLAYING — split left/right
+    return x < PLAYFIELD_W / 2 ? 'leftFlipper' : 'rightFlipper';
   }
 
   private rebuildWorld() {

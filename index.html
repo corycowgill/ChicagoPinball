@@ -2,55 +2,73 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta name="theme-color" content="#05060a" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Chicago Pinball" />
+    <meta name="format-detection" content="telephone=no" />
     <title>Chicago Pinball — The Windy City</title>
     <style>
       :root {
         color-scheme: dark;
+        /* Fallback for browsers without dvh support. */
+        --vh: 100vh;
+      }
+      @supports (height: 100dvh) {
+        :root { --vh: 100dvh; }
+      }
+      *,
+      *::before,
+      *::after {
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
       }
       html, body {
         margin: 0;
         padding: 0;
-        height: 100%;
+        height: var(--vh);
+        width: 100vw;
         background: #05060a;
         overflow: hidden;
         font-family: 'Helvetica Neue', Arial, sans-serif;
         color: #e8efff;
+        overscroll-behavior: none;
+        -webkit-user-select: none;
+        user-select: none;
+        touch-action: none;
       }
       body {
         display: flex;
         align-items: center;
         justify-content: center;
-        touch-action: none;
-        user-select: none;
+        padding: env(safe-area-inset-top) env(safe-area-inset-right)
+                 env(safe-area-inset-bottom) env(safe-area-inset-left);
+        box-sizing: border-box;
       }
       #stage {
         display: block;
-        height: 100vh;
-        max-height: 100vh;
-        width: auto;
+        /* Fit within both viewport dimensions while preserving 540:960 aspect. */
+        width: min(100vw, calc(var(--vh) * 540 / 960));
+        height: auto;
+        max-width: 100%;
+        max-height: 100%;
         aspect-ratio: 540 / 960;
         background: #05060a;
         box-shadow:
           0 0 60px rgba(0, 240, 255, 0.18),
           0 0 120px rgba(255, 60, 100, 0.12);
         image-rendering: -webkit-optimize-contrast;
-      }
-      #help {
-        position: fixed;
-        left: 16px;
-        bottom: 12px;
-        font-size: 12px;
-        color: #6b7793;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        pointer-events: none;
+        touch-action: none;
       }
     </style>
   </head>
   <body>
     <canvas id="stage" width="540" height="960"></canvas>
-    <div id="help">Z / &#8260; flippers &nbsp;&middot;&nbsp; SPACE plunger &nbsp;&middot;&nbsp; ENTER start</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
