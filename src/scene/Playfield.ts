@@ -40,7 +40,7 @@ export class Playfield {
   /** Drain sensor (bottom of playfield). */
   drainSensor: Matter.Body;
   /** The launch lane geometry (x of plunger, y of resting ball, etc.). */
-  readonly launchX = PLAYFIELD_W - 30;
+  readonly launchX = PLAYFIELD_W - 27;
   readonly launchRestY = PLAYFIELD_H - 90;
 
   constructor(private physics: Physics, private events: PlayfieldEvents) {
@@ -49,11 +49,12 @@ export class Playfield {
     this.ball = new Ball(this.launchX, this.launchRestY);
     physics.add(this.ball.body);
 
-    // Flippers
+    // Flippers — pivot offset 102 px from center gives a tip gap of ~36 px,
+    // wider than the 22 px ball so a missed ball drains cleanly.
     const flipperY = PLAYFIELD_H - 130;
-    const gap = 92;
-    this.leftFlipper = new Flipper('left', PLAYFIELD_W / 2 - gap, flipperY);
-    this.rightFlipper = new Flipper('right', PLAYFIELD_W / 2 + gap, flipperY);
+    const flipperGap = 102;
+    this.leftFlipper = new Flipper('left', PLAYFIELD_W / 2 - flipperGap, flipperY);
+    this.rightFlipper = new Flipper('right', PLAYFIELD_W / 2 + flipperGap, flipperY);
     physics.add(this.leftFlipper.body, this.leftFlipper.pivot);
     physics.add(this.rightFlipper.body, this.rightFlipper.pivot);
 
@@ -116,8 +117,13 @@ export class Playfield {
     });
     physics.add(this.ramp.entry, this.ramp.exit);
 
-    // Plunger
-    this.plunger = new Plunger(this.launchX, PLAYFIELD_H - 60);
+    // Plunger — wide enough to span almost the full lane so a falling ball
+    // can't slip past it on either side.
+    const laneInnerX = PLAYFIELD_W - 56 + 3; // right edge of separator wall
+    const laneOuterX = PLAYFIELD_W - 1;      // just inside outer wall
+    const plungerCx = (laneInnerX + laneOuterX) / 2;
+    const plungerW = laneOuterX - laneInnerX - 4;
+    this.plunger = new Plunger(plungerCx, PLAYFIELD_H - 60, plungerW);
     physics.add(this.plunger.body);
 
     // Drain sensor (full width thin strip just below flippers)
@@ -224,21 +230,28 @@ export class Playfield {
       ),
     );
 
-    // Launch-lane top deflector: a diagonal wall going from the top of the
-    // lane separator up to the top-right corner. Ball coming up gets pushed
-    // left into the playfield; also prevents ball re-entering the lane from
-    // the playfield.
-    const dx = W - laneX;
-    const dy = laneTop - 0;
-    const dlen = Math.hypot(dx, dy);
-    const dcx = (laneX + W) / 2;
-    const dcy = laneTop / 2;
+    // Launch-lane top deflector: slopes from upper-LEFT to lower-RIGHT
+    // (in screen coords, y increases downward). A ball travelling up the
+    // lane hits the underside and is reflected leftward into the playfield.
+    // Going the other way (upper-right to lower-left) would just push the
+    // ball back into the corner — the bug we're fixing.
+    const defLeft = { x: laneX - 38, y: laneTop - 80 };
+    const defRight = { x: W + 4, y: laneTop - 4 };
+    const defDx = defRight.x - defLeft.x;
+    const defDy = defRight.y - defLeft.y;
+    const defLen = Math.hypot(defDx, defDy);
     walls.push(
-      Matter.Bodies.rectangle(dcx, dcy, dlen, 8, {
-        isStatic: true,
-        angle: Math.atan2(-dy, dx),
-        label: 'wall',
-      }),
+      Matter.Bodies.rectangle(
+        (defLeft.x + defRight.x) / 2,
+        (defLeft.y + defRight.y) / 2,
+        defLen,
+        8,
+        {
+          isStatic: true,
+          angle: Math.atan2(defDy, defDx),
+          label: 'wall',
+        },
+      ),
     );
 
     // Bottom angled drains (inlanes)

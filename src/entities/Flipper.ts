@@ -107,18 +107,31 @@ export class Flipper {
     for (let i = 1; i < verts.length; i++) ctx.lineTo(verts[i].x, verts[i].y);
     ctx.closePath();
     ctx.fill();
-    // bright stripe
+
+    // Bright inner stripe along the flipper axis
     ctx.shadowBlur = 0;
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1.5;
-    ctx.globalAlpha = 0.6;
-    ctx.beginPath();
+    ctx.globalAlpha = 0.55;
     const a = this.body.angle;
     const cx = this.body.position.x;
     const cy = this.body.position.y;
     const halfLen = FLIPPER_LEN / 2 - 6;
+    ctx.beginPath();
     ctx.moveTo(cx - Math.cos(a) * halfLen, cy - Math.sin(a) * halfLen);
     ctx.lineTo(cx + Math.cos(a) * halfLen, cy + Math.sin(a) * halfLen);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // Pivot stud — makes the hinge visible and reads as symmetric.
+    const px = this.pivot.pointA.x;
+    const py = this.pivot.pointA.y;
+    ctx.fillStyle = '#1a2030';
+    ctx.beginPath();
+    ctx.arc(px, py, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.lineWidth = 1.2;
     ctx.stroke();
     ctx.restore();
   }
