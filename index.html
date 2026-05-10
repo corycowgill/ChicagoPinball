@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>Chicago Pinball — The Windy City</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #05060a;
+        overflow: hidden;
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        color: #e8efff;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        touch-action: none;
+        user-select: none;
+      }
+      #stage {
+        display: block;
+        height: 100vh;
+        max-height: 100vh;
+        width: auto;
+        aspect-ratio: 540 / 960;
+        background: #05060a;
+        box-shadow:
+          0 0 60px rgba(0, 240, 255, 0.18),
+          0 0 120px rgba(255, 60, 100, 0.12);
+        image-rendering: -webkit-optimize-contrast;
+      }
+      #help {
+        position: fixed;
+        left: 16px;
+        bottom: 12px;
+        font-size: 12px;
+        color: #6b7793;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="stage" width="540" height="960"></canvas>
+    <div id="help">Z / &#8260; flippers &nbsp;&middot;&nbsp; SPACE plunger &nbsp;&middot;&nbsp; ENTER start</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
