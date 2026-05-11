@@ -88,9 +88,12 @@ export class Playfield {
     this.balls.push(initialBall);
     physics.add(initialBall.body);
 
-    // ── FLIPPERS — bigger bats, mirror-symmetric, tight drain. ──
-    const flipperY = PLAYFIELD_H - 150;
-    const flipperGap = 110;
+    // ── FLIPPERS — bigger bats, RAISED higher up the playfield, tighter
+    //    drain. Pivots are 105 px from the play centre, giving a tip-to-tip
+    //    gap of about 11 px (tight enough to make a missed shot recoverable
+    //    on a cradle). ──
+    const flipperY = PLAYFIELD_H - 200;
+    const flipperGap = 105;
     this.leftFlipper = new Flipper('left', this.playCenter - flipperGap, flipperY);
     this.rightFlipper = new Flipper('right', this.playCenter + flipperGap, flipperY);
     physics.add(this.leftFlipper.body, this.leftFlipper.pivot);
@@ -134,14 +137,16 @@ export class Playfield {
       physics.add(r.sensor);
     }
 
-    // ── THE BEAN — multiball lock saucer at upper-centre. ──
-    this.bean = new Bean(this.playCenter, 290, 36);
+    // ── THE BEAN — smaller chrome dome at upper-centre (the user's
+    //    feedback: shrink so it stops blocking flow). ──
+    this.bean = new Bean(this.playCenter, 280, 26);
     physics.add(this.bean.body, this.bean.lockSensor);
 
-    // ── POP BUMPERS — triangle just below the bean. ──
-    this.popBumpers.push(new PopBumper(this.playCenter - 70, 360, 22, COLOR.INSERT_AMBER));
-    this.popBumpers.push(new PopBumper(this.playCenter + 70, 360, 22, COLOR.INSERT_RED));
-    this.popBumpers.push(new PopBumper(this.playCenter, 410, 22, COLOR.INSERT_BLUE));
+    // ── POP BUMPERS — triangle to the LEFT of the bean (clears the centre
+    //    so the centre ramp shot from the right flipper has a clean line). ──
+    this.popBumpers.push(new PopBumper(this.playCenter - 76, 320, 22, COLOR.INSERT_AMBER));
+    this.popBumpers.push(new PopBumper(this.playCenter + 76, 320, 22, COLOR.INSERT_RED));
+    this.popBumpers.push(new PopBumper(this.playCenter, 360, 22, COLOR.INSERT_BLUE));
     for (const p of this.popBumpers) physics.add(p.body);
 
     // ── SPORTS TEAM STANDUPS — 2-banks INSIDE the ramp curves (between the
@@ -388,6 +393,24 @@ export class Playfield {
     physics.on('drain', (_s, o) => {
       if (o.label === 'ball') this.events.onDrain(o);
     });
+
+    // Launch-exit teleport: ball going UP through the launch-exit sensor is
+    // teleported to the upper playfield, just below the rollover lanes,
+    // with a tiny downward velocity so it naturally falls into the bumper
+    // cluster. This is the "shooter habitrail dump point" — visually
+    // matched by the chrome rail above.
+    physics.on('launch-exit', (_s, o) => {
+      if (o.label !== 'ball') return;
+      if (o.velocity.y >= 0) return; // only upward-moving balls
+      this.physics.defer(() => {
+        // Drop the ball over the LEFT rollover lane with a slight rightward
+        // bias, so it passes through the rollovers (skill shot) and falls
+        // into the bumper triangle. Both flippers can then receive it.
+        Matter.Body.setPosition(o, { x: 120, y: PLAYFIELD_TOP + 8 });
+        Matter.Body.setVelocity(o, { x: 1, y: 3 });
+        Matter.Body.setAngularVelocity(o, 0);
+      });
+    });
   }
 
   private addWall(body: Matter.Body, outline: { x: number; y: number }[], kind: WallDef['kind'] = 'rail') {
@@ -410,35 +433,10 @@ export class Playfield {
       this.addWall(w, [], 'wood');
     }
 
-    // ── Backbox / playfield divider rail at y=PLAYFIELD_TOP — separates the
-    //    top apron from the live playfield. Has a centred opening for the
-    //    Bean lock and openings on both sides for ramp returns. ──
-    const dividerY = PLAYFIELD_TOP - 4;
-    // Left half
-    {
-      const fromX = 6;
-      const toX = this.playCenter - 60;
-      const cx = (fromX + toX) / 2;
-      const div = Matter.Bodies.rectangle(cx, dividerY, toX - fromX, 6, {
-        isStatic: true, label: 'wall',
-      });
-      this.addWall(div, polyOf(div), 'rail');
-    }
-    // Right half (stops before the launch lane top opening)
-    {
-      const fromX = this.playCenter + 60;
-      const toX = this.laneInnerX - 4;
-      const cx = (fromX + toX) / 2;
-      const div = Matter.Bodies.rectangle(cx, dividerY, toX - fromX, 6, {
-        isStatic: true, label: 'wall',
-      });
-      this.addWall(div, polyOf(div), 'rail');
-    }
-
     // ── SHOOTER LANE walls ──
     // Inner wall (separates the shooter lane from the playfield), runs from
-    // bottom up to the curved deflector at the top.
-    const laneWallY1 = PLAYFIELD_TOP + 6;
+    // PLAYFIELD_TOP all the way down to just above the plunger.
+    const laneWallY1 = PLAYFIELD_TOP + 4;
     const laneWallY2 = H - 32;
     {
       const cy = (laneWallY1 + laneWallY2) / 2;
@@ -448,29 +446,49 @@ export class Playfield {
       });
       this.addWall(wall, polyOf(wall), 'rail');
     }
-    // Curved deflector at the top of the shooter lane — a single angled
-    // segment from (laneInnerX, PLAYFIELD_TOP) up-and-leftward to a point
-    // above the playfield divider, which deflects the launched ball into
-    // the playfield.
+    // Shooter-lane EXIT sensor — when the ball clears the top of the lane
+    // moving upward, it's teleported into the upper playfield (a "shooter
+    // habitrail" on a real Stern table feeds the ball over the back of the
+    // playfield and dumps it at the top of one of the lanes). This is more
+    // reliable than a reflective wall because the launched ball's apex
+    // depends on plunger power and per-step velocity capping; a sensor
+    // always fires regardless.
+    const launchExitSensor = Matter.Bodies.rectangle(
+      this.launchX,
+      PLAYFIELD_TOP - 40,        // y = 160 — above the lane wall top
+      this.laneOuterX - this.laneInnerX,
+      8,
+      { isStatic: true, isSensor: true, label: 'launch-exit' },
+    );
+    this.physics.add(launchExitSensor);
+
+    // Visible CHROME HABITRAIL drawn over the apron — purely cosmetic, but
+    // shows the player the path the launched ball takes. Stored in
+    // `habitrails[]` so the renderer picks it up.
+    this.habitrails.push({
+      points: [
+        { x: this.launchX, y: PLAYFIELD_TOP - 40 },
+        { x: this.launchX - 30, y: HUD_BOTTOM + 30 },
+        { x: this.playCenter + 80, y: HUD_BOTTOM + 14 },
+        { x: this.playCenter, y: HUD_BOTTOM + 12 },
+        { x: this.playCenter - 90, y: HUD_BOTTOM + 22 },
+        { x: 80, y: PLAYFIELD_TOP - 16 },
+      ],
+      tone: 'chrome',
+    });
+    // Apron-side back wall — a short metal rail along the LEFT half of the
+    // playfield top that defines the upper playfield boundary on that side.
+    // The right half is intentionally OPEN so the launched ball can flow
+    // across the top from the shooter habitrail down into the playfield.
     {
-      const x1 = this.laneInnerX;
-      const y1 = PLAYFIELD_TOP + 6;
-      const x2 = this.playCenter + 100;
-      const y2 = HUD_BOTTOM + 8;
-      const cx = (x1 + x2) / 2;
-      const cy = (y1 + y2) / 2;
-      const dx = x2 - x1;
-      const dy = y2 - y1;
-      const len = Math.hypot(dx, dy);
-      const wall = Matter.Bodies.rectangle(cx, cy, len, 6, {
-        isStatic: true,
-        angle: Math.atan2(dy, dx),
-        label: 'wall',
+      const fromX = 6;
+      const toX = this.playCenter - 70;
+      const cx = (fromX + toX) / 2;
+      const div = Matter.Bodies.rectangle(cx, PLAYFIELD_TOP - 2, toX - fromX, 6, {
+        isStatic: true, label: 'wall',
       });
-      this.addWall(wall, polyOf(wall), 'rail');
+      this.addWall(div, polyOf(div), 'rail');
     }
-    // Outer launch lane wall (right cabinet edge) is already the cabinet
-    // outer wall; nothing to add.
 
     // ── Inlane diagonals — tighter funnels above each flipper. ──
     const drainAngle = 0.55;
