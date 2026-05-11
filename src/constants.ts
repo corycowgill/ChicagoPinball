@@ -9,12 +9,16 @@ export const BALL_MAX_SPEED = 22;
 export const GRAVITY_Y = 0.95;
 
 export const FLIPPER_LEN = 108;
-export const FLIPPER_HEIGHT = 20;
+// Thicker bat (was 20) — at 26 the ball can't tunnel between frames even at
+// max kick speed (kickStep × FLIPPER_LEN ≈ 17 px/frame at the tip < 26).
+export const FLIPPER_HEIGHT = 26;
 export const FLIPPER_REST_ANGLE = 0.42;
 export const FLIPPER_ACTIVE_ANGLE = -0.42;
-// Per-frame radian increments — see Flipper.ts.
-export const FLIPPER_KICK_VEL = 0.21;
-export const FLIPPER_RETURN_VEL = 0.12;
+// Per-frame radian increments — see Flipper.ts. Reduced from 0.21/0.12 to
+// 0.16/0.10 to give Matter's collision detection more frames to register
+// flipper-vs-ball overlap during a kick (was a tunneling source).
+export const FLIPPER_KICK_VEL = 0.16;
+export const FLIPPER_RETURN_VEL = 0.10;
 
 export const PLUNGER_MAX_PULL = 110;
 export const PLUNGER_KICK = 0.045;

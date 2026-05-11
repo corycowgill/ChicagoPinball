@@ -572,16 +572,18 @@ export class Playfield {
 
     // INLANE DIAGONAL FLOOR — angled rail at the bottom of the inlane
     // channel that catches the ball as it falls past the slingshot and
-    // slides it inward toward the flipper pivot. The diagonal's HIGH end
-    // is at the outlane inner wall (so the ball doesn't fall into the
-    // outlane through the inlane floor) and its LOW end is at the flipper
-    // pivot. Slope is shallow so the ball can be cradled.
-    const inlaneTopY = this.flipperY - 38;       // just below slingshot bottom
-    const inlaneBotY = this.flipperY + 12;       // at the flipper bat level
+    // delivers it ABOVE the flipper bat (NOT below — putting the endpoint
+    // below the bat means the ball arrives at the flipper's UNDERSIDE and
+    // goes through to the drain instead of landing on top of the bat,
+    // which was the user-reported "balls go through the right flipper"
+    // bug). The LOW end now sits at flipperY-30, so the ball lands ON TOP
+    // of the bat with a small drop, then can be cradled or flipped.
+    const inlaneTopY = this.flipperY - 50;       // well above slingshot bottom
+    const inlaneBotY = this.flipperY - 30;       // ABOVE the flipper bat top
     {
-      // LEFT inlane: ball slides down-RIGHT toward left flipper pivot.
+      // LEFT inlane: ball slides down-RIGHT toward left flipper pivot area.
       const x1 = outlaneInnerX + 2;        const y1 = inlaneTopY;
-      const x2 = this.playCenter - this.flipperGap + 4; const y2 = inlaneBotY;
+      const x2 = this.playCenter - this.flipperGap + 8; const y2 = inlaneBotY;
       const dx = x2 - x1, dy = y2 - y1;
       const len = Math.hypot(dx, dy);
       const w = Matter.Bodies.rectangle((x1 + x2) / 2, (y1 + y2) / 2, len, 6, {
@@ -590,9 +592,9 @@ export class Playfield {
       this.addWall(w, polyOf(w), 'rail');
     }
     {
-      // RIGHT inlane: ball slides down-LEFT toward right flipper pivot.
+      // RIGHT inlane: ball slides down-LEFT toward right flipper pivot area.
       const x1 = outlaneInnerXRight - 2;   const y1 = inlaneTopY;
-      const x2 = this.playCenter + this.flipperGap - 4; const y2 = inlaneBotY;
+      const x2 = this.playCenter + this.flipperGap - 8; const y2 = inlaneBotY;
       const dx = x2 - x1, dy = y2 - y1;
       const len = Math.hypot(dx, dy);
       const w = Matter.Bodies.rectangle((x1 + x2) / 2, (y1 + y2) / 2, len, 6, {

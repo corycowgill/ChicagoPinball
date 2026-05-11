@@ -16,8 +16,12 @@ export class Physics {
   constructor() {
     this.engine = Matter.Engine.create({
       gravity: { x: 0, y: GRAVITY_Y, scale: 0.001 },
-      positionIterations: 10,
-      velocityIterations: 10,
+      // Higher iterations help fast-moving balls vs kinematic flippers —
+      // each step does more position correction passes so a ball can't
+      // tunnel through a flipper bat that's been teleported between frames.
+      positionIterations: 20,
+      velocityIterations: 16,
+      constraintIterations: 6,
       enableSleeping: false,
     });
     this.world = this.engine.world;
