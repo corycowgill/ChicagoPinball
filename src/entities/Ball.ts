@@ -44,13 +44,16 @@ export class Ball {
   unstickIfStalled() {
     const v = this.body.velocity;
     const mag = Math.hypot(v.x, v.y);
-    if (mag < 0.4) {
+    // Threshold raised so brief contact pauses don't trigger; trigger
+    // window shortened so the ball doesn't sit visibly idle for a full
+    // second when it does get cradled.
+    if (mag < 0.6) {
       this.stuckFrames++;
-      if (this.stuckFrames > 60) {
-        // Pick a horizontal direction biased AWAY from whichever side of
-        // centre the ball is on, so a stuck ball moves toward play.
-        const sign = this.body.position.x < 270 ? +1 : -1;
-        Matter.Body.setVelocity(this.body, { x: sign * 3, y: 5 });
+      if (this.stuckFrames > 30) {
+        // Direction bias: nudge AWAY from the closer side of centre so
+        // the ball moves into open play.
+        const sign = this.body.position.x < 240 ? +1 : -1;
+        Matter.Body.setVelocity(this.body, { x: sign * 4, y: 6 });
         Matter.Body.setAngularVelocity(this.body, 0);
         this.stuckFrames = 0;
       }
