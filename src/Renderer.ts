@@ -423,16 +423,29 @@ export class Renderer {
       { text: 'SOX',   color: COLOR.INSERT_PURPLE, target: pf.standups[3] },
     ];
     ctx.save();
-    ctx.font = 'bold 11px "Helvetica Neue", Arial, sans-serif';
+    ctx.font = 'bold 12px "Helvetica Neue", Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.shadowColor = '#000';
-    ctx.shadowBlur = 5;
     for (const { text, color, target } of labels) {
       const x = target.body.position.x;
-      const y = target.body.position.y - 14;
-      ctx.fillStyle = color;
+      const y = target.body.position.y - 16;
+      // Pill-shaped backdrop for the label so it reads against any
+      // background (ramp plate, playfield wood, anything).
+      const w = ctx.measureText(text).width + 12;
+      const h = 14;
+      ctx.fillStyle = 'rgba(2, 6, 14, 0.78)';
+      ctx.beginPath();
+      ctx.roundRect(x - w / 2, y - h / 2, w, h, 4);
+      ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // Label text with strong glow + crisp shadow.
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = '#ffffff';
       ctx.fillText(text, x, y);
+      ctx.shadowBlur = 0;
     }
     ctx.restore();
   }
