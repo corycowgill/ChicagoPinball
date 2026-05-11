@@ -34,19 +34,41 @@ export class Ball {
     const { x, y } = this.body.position;
     const r = BALL_RADIUS;
 
+    // Ground shadow (more elliptical = ball is closer to playfield)
     ctx.save();
-    ctx.shadowColor = COLOR.NEON_CYAN;
-    ctx.shadowBlur = 14;
+    const sh = ctx.createRadialGradient(x + 1, y + r * 0.7, 0, x + 1, y + r * 0.7, r * 1.4);
+    sh.addColorStop(0, 'rgba(0, 0, 0, 0.65)');
+    sh.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = sh;
+    ctx.beginPath();
+    ctx.ellipse(x + 1.5, y + r * 0.85, r * 1.1, r * 0.45, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
 
-    const grad = ctx.createRadialGradient(x - r * 0.4, y - r * 0.5, 1, x, y, r);
-    grad.addColorStop(0, COLOR.BALL_HIGHLIGHT);
-    grad.addColorStop(0.55, COLOR.BALL);
-    grad.addColorStop(1, '#5a6478');
-
+    // Chrome ball
+    ctx.save();
+    const grad = ctx.createRadialGradient(x - r * 0.4, y - r * 0.55, 1, x, y, r);
+    grad.addColorStop(0, COLOR.BALL_HI);
+    grad.addColorStop(0.45, COLOR.BALL);
+    grad.addColorStop(0.85, '#7a849c');
+    grad.addColorStop(1, COLOR.BALL_DARK);
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
+
+    // Specular pip
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.beginPath();
+    ctx.ellipse(x - r * 0.35, y - r * 0.5, r * 0.22, r * 0.13, -0.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Faint reflection-line at the equator
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.ellipse(x, y - r * 0.05, r * 0.85, r * 0.18, 0, 0, Math.PI * 2);
+    ctx.stroke();
     ctx.restore();
   }
 }

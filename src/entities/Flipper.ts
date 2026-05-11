@@ -123,42 +123,81 @@ export class Flipper {
   }
 
   draw(ctx: CanvasRenderingContext2D) {
-    const verts = this.body.vertices;
-    ctx.save();
-    ctx.shadowColor = COLOR.FLIPPER;
-    ctx.shadowBlur = 18;
-    ctx.fillStyle = COLOR.FLIPPER;
-    ctx.beginPath();
-    ctx.moveTo(verts[0].x, verts[0].y);
-    for (let i = 1; i < verts.length; i++) ctx.lineTo(verts[i].x, verts[i].y);
-    ctx.closePath();
-    ctx.fill();
-
-    // Bright inner stripe along the flipper axis
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.5;
-    ctx.globalAlpha = 0.55;
     const a = this.body.angle;
     const cx = this.body.position.x;
     const cy = this.body.position.y;
-    const halfLen = FLIPPER_LEN / 2 - 6;
-    ctx.beginPath();
-    ctx.moveTo(cx - Math.cos(a) * halfLen, cy - Math.sin(a) * halfLen);
-    ctx.lineTo(cx + Math.cos(a) * halfLen, cy + Math.sin(a) * halfLen);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
+    const half = FLIPPER_LEN / 2;
+    const h = FLIPPER_HEIGHT;
 
-    // Pivot stud — makes the hinge visible and reads as symmetric.
+    // Drop shadow under the flipper bat.
+    ctx.save();
+    ctx.translate(cx + 1.5, cy + 4);
+    ctx.rotate(a);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.beginPath();
+    drawFlipperShape(ctx, half, h);
+    ctx.fill();
+    ctx.restore();
+
+    // Flipper bat — red plastic body with metallic gradient.
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(a);
+    const grad = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+    grad.addColorStop(0, COLOR.FLIPPER_RED_HI);
+    grad.addColorStop(0.45, COLOR.FLIPPER_RED);
+    grad.addColorStop(1, COLOR.FLIPPER_RED_LOW);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    drawFlipperShape(ctx, half, h);
+    ctx.fill();
+
+    // Glossy highlight stripe along the top edge of the bat.
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.fillRect(-half + 8, -h / 2 + 2, FLIPPER_LEN - 18, 1.6);
+
+    // Black rubber strip along the leading (striking) face.
+    ctx.fillStyle = COLOR.FLIPPER_RUBBER;
+    ctx.beginPath();
+    ctx.moveTo(-half + 4, h / 2);
+    ctx.lineTo(half - 6, h / 2 - 2);
+    ctx.lineTo(half - 6, h / 2 - 5);
+    ctx.lineTo(-half + 4, h / 2 - 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // Pivot stud — chrome cap at the hinge for a finished look.
     const px = this.pivot.pointA.x;
     const py = this.pivot.pointA.y;
-    ctx.fillStyle = '#1a2030';
+    ctx.save();
+    const studGrad = ctx.createRadialGradient(px - 2, py - 2, 0, px, py, 6);
+    studGrad.addColorStop(0, COLOR.METAL_LIGHT);
+    studGrad.addColorStop(0.6, COLOR.METAL_MID);
+    studGrad.addColorStop(1, COLOR.METAL_DARK);
+    ctx.fillStyle = studGrad;
     ctx.beginPath();
-    ctx.arc(px, py, 5, 0, Math.PI * 2);
+    ctx.arc(px, py, 6, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.arc(px - 1.5, py - 2, 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.fill();
     ctx.restore();
   }
+}
+
+/** Tapered flipper bat outline — wider at the pivot end, narrower at the
+ *  tip, with a rounded tip. Drawn in the body's local frame (axis along +x). */
+function drawFlipperShape(ctx: CanvasRenderingContext2D, half: number, h: number) {
+  const tipR = h / 2 - 2;
+  ctx.beginPath();
+  ctx.moveTo(-half, -h / 2);
+  ctx.lineTo(half - tipR, -h / 2 + 1);
+  ctx.arc(half - tipR, 0, tipR, -Math.PI / 2, Math.PI / 2);
+  ctx.lineTo(-half, h / 2);
+  ctx.arc(-half + 0, 0, h / 2, Math.PI / 2, -Math.PI / 2);
+  ctx.closePath();
 }

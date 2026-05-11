@@ -1,62 +1,100 @@
 import Matter from 'matter-js';
 import { COLOR } from '../constants';
+import { softShadow } from '../Graphics';
 
+/** Stern-style pop bumper: a translucent skirt at playfield level, a chrome
+ *  collar, and a domed lit cap on top with a flashing lamp inside. Pops the
+ *  ball outward on contact. */
 export class PopBumper {
   readonly body: Matter.Body;
   readonly radius: number;
-  private flash = 0; // 0..1 fades each frame
+  private flash = 0;
   private color: string;
 
-  constructor(x: number, y: number, radius = 22, color = COLOR.NEON_AMBER, label = 'pop-bumper') {
+  constructor(x: number, y: number, radius = 24, color = COLOR.INSERT_AMBER) {
     this.radius = radius;
     this.color = color;
     this.body = Matter.Bodies.circle(x, y, radius, {
       isStatic: true,
-      restitution: 0.9,
+      restitution: 0.95,
       friction: 0,
-      label,
+      label: 'pop-bumper',
     });
   }
 
-  /** Apply outward impulse to ball on collision. Call from collision handler. */
   pop(ball: Matter.Body) {
     const dx = ball.position.x - this.body.position.x;
     const dy = ball.position.y - this.body.position.y;
     const len = Math.hypot(dx, dy) || 1;
-    const nx = dx / len;
-    const ny = dy / len;
-    const force = 0.04 * ball.mass;
-    Matter.Body.applyForce(ball, ball.position, { x: nx * force, y: ny * force });
+    const force = 0.045 * ball.mass;
+    Matter.Body.applyForce(ball, ball.position, {
+      x: (dx / len) * force,
+      y: (dy / len) * force,
+    });
     this.flash = 1;
   }
 
   tick(dtMs: number) {
-    if (this.flash > 0) this.flash = Math.max(0, this.flash - dtMs / 200);
+    if (this.flash > 0) this.flash = Math.max(0, this.flash - dtMs / 220);
   }
 
   draw(ctx: CanvasRenderingContext2D) {
     const { x, y } = this.body.position;
+    const r = this.radius;
+
+    // Skirt — translucent ring at playfield level the ball physically rebounds
+    // off in real pinball. Drawn as a wider, dimmer disc.
     ctx.save();
+    softShadow(ctx, x, y + 6, r * 1.3, r * 0.55, 0.55);
+
+    // Lit ring (the "skirt LED" glow) when flashing.
+    const skirtAlpha = 0.3 + 0.55 * this.flash;
     ctx.shadowColor = this.color;
-    ctx.shadowBlur = 18 + 22 * this.flash;
-
-    // outer glow ring
-    ctx.strokeStyle = this.color;
-    ctx.lineWidth = 3 + 3 * this.flash;
+    ctx.shadowBlur = 18 + 24 * this.flash;
+    ctx.fillStyle = `rgba(${hexToRgb(this.color)}, ${skirtAlpha})`;
     ctx.beginPath();
-    ctx.arc(x, y, this.radius, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // inner cap
-    const grad = ctx.createRadialGradient(x - this.radius * 0.3, y - this.radius * 0.4, 1, x, y, this.radius);
-    grad.addColorStop(0, '#ffffff');
-    grad.addColorStop(0.4, this.color);
-    grad.addColorStop(1, '#1a1a2a');
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(x, y, this.radius * 0.65, 0, Math.PI * 2);
+    ctx.arc(x, y, r * 1.05, 0, Math.PI * 2);
     ctx.fill();
 
+    // Chrome collar
+    ctx.shadowBlur = 0;
+    const collar = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, 1, x, y, r * 0.85);
+    collar.addColorStop(0, COLOR.METAL_LIGHT);
+    collar.addColorStop(0.6, COLOR.METAL_MID);
+    collar.addColorStop(1, COLOR.METAL_DARK);
+    ctx.fillStyle = collar;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.78, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Inner lit cap
+    ctx.shadowColor = this.color;
+    ctx.shadowBlur = 12 + 16 * this.flash;
+    const cap = ctx.createRadialGradient(x - r * 0.25, y - r * 0.3, 1, x, y, r * 0.6);
+    cap.addColorStop(0, '#ffffff');
+    cap.addColorStop(0.45, this.color);
+    cap.addColorStop(1, dimRgba(this.color, 0.25));
+    ctx.fillStyle = cap;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.55, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Specular pip
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.beginPath();
+    ctx.ellipse(x - r * 0.22, y - r * 0.32, r * 0.13, r * 0.07, -0.3, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
+}
+
+function hexToRgb(hex: string): string {
+  if (hex.startsWith('rgb')) return hex.slice(hex.indexOf('(') + 1, hex.indexOf(')'));
+  let h = hex.replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  return `${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)}`;
+}
+function dimRgba(hex: string, alpha: number): string {
+  return `rgba(${hexToRgb(hex)}, ${alpha})`;
 }

@@ -12,7 +12,14 @@ export type ScoreEventKind =
   | 'slingshot'
   | 'drop-target'
   | 'spinner'
-  | 'loop-ramp'
+  | 'left-orbit'
+  | 'right-orbit'
+  | 'center-ramp'
+  | 'scoop'
+  | 'captive'
+  | 'lock'
+  | 'multiball-jackpot'
+  | 'mode-shot'
   | 'super-jackpot';
 
 export interface ScoreEvent {

@@ -1,17 +1,13 @@
 import Matter from 'matter-js';
 import { COLOR, PLUNGER_KICK } from '../constants';
+import { metalPost } from '../Graphics';
 
-/**
- * Vertical plunger in the right launch lane. We don't simulate it as a spring;
- * we just track a "pull" amount while space is held and apply an upward impulse
- * to a ball resting on top when released.
- */
 export class Plunger {
   readonly body: Matter.Body;
   readonly width: number;
   readonly height = 32;
   private restY: number;
-  private pull = 0;     // 0..1
+  private pull = 0;
   private holding = false;
 
   constructor(x: number, y: number, width = 46) {
@@ -28,7 +24,6 @@ export class Plunger {
     this.holding = true;
   }
 
-  /** Returns the impulse magnitude applied (0 if not released from a pull). */
   release(): number {
     if (!this.holding) return 0;
     const force = this.pull * PLUNGER_KICK;
@@ -37,63 +32,94 @@ export class Plunger {
     return force;
   }
 
-  /** Plunger body stays fixed at restY (static bodies don't drag dynamic ones
-   *  along in Matter.js, so animating its position would just drop the ball
-   *  through it). We only track the pull amount for kick power + the visual. */
   tick(dtMs: number) {
-    if (this.holding) {
-      this.pull = Math.min(1, this.pull + dtMs / 800);
-    } else {
-      this.pull = 0;
-    }
+    if (this.holding) this.pull = Math.min(1, this.pull + dtMs / 800);
+    else this.pull = 0;
   }
 
-  isHolding() {
-    return this.holding;
-  }
-
-  pullAmount() {
-    return this.pull;
-  }
+  isHolding() { return this.holding; }
+  pullAmount() { return this.pull; }
 
   draw(ctx: CanvasRenderingContext2D) {
     const { x, y } = this.body.position;
     const w = this.width;
     const h = this.height;
-    ctx.save();
 
-    // Pull-strength gauge below the plunger (since the body itself doesn't move).
-    const gaugeH = 70;
-    const gaugeTop = y + h / 2 + 8;
-    ctx.fillStyle = 'rgba(20, 28, 48, 0.7)';
-    ctx.fillRect(x - 4, gaugeTop, 8, gaugeH);
+    // Power gauge to the LEFT of the plunger so it doesn't overlap the head.
+    const gaugeX = x - w / 2 - 14;
+    const gaugeH = 84;
+    const gaugeTop = y - gaugeH / 2;
+    ctx.save();
+    ctx.fillStyle = 'rgba(20, 28, 48, 0.85)';
+    ctx.strokeStyle = 'rgba(255, 181, 71, 0.45)';
+    ctx.lineWidth = 1;
+    ctx.fillRect(gaugeX - 4, gaugeTop, 8, gaugeH);
+    ctx.strokeRect(gaugeX - 4, gaugeTop, 8, gaugeH);
     ctx.shadowColor = COLOR.NEON_AMBER;
     ctx.shadowBlur = 12;
     ctx.fillStyle = COLOR.NEON_AMBER;
     const fillH = gaugeH * this.pull;
-    ctx.fillRect(x - 3, gaugeTop + (gaugeH - fillH), 6, fillH);
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = 'rgba(255, 181, 71, 0.5)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x - 4, gaugeTop, 8, gaugeH);
+    ctx.fillRect(gaugeX - 3, gaugeTop + (gaugeH - fillH), 6, fillH);
+    ctx.restore();
 
-    // Plunger head
-    ctx.shadowColor = COLOR.NEON_PINK;
-    ctx.shadowBlur = 14;
-    const grad = ctx.createLinearGradient(x - w / 2, y, x + w / 2, y);
-    grad.addColorStop(0, '#a01a32');
-    grad.addColorStop(0.5, COLOR.NEON_PINK);
-    grad.addColorStop(1, '#a01a32');
-    ctx.fillStyle = grad;
+    // Mounting post above the plunger (decorative chrome cap).
+    metalPost(ctx, x, y - 90, 6);
+
+    // Spring shaft between the post and the plunger head — coil that
+    // visually compresses when pulled.
+    ctx.save();
+    const coilTop = y - 90 + 6;
+    const coilBottom = y - h / 2 - 4;
+    const coils = 9;
+    ctx.strokeStyle = COLOR.METAL_MID;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    for (let i = 0; i <= coils; i++) {
+      const t = i / coils;
+      const cy = coilTop + (coilBottom - coilTop) * t;
+      const cx = x + Math.sin(t * Math.PI * coils) * 4;
+      if (i === 0) ctx.moveTo(cx, cy);
+      else ctx.lineTo(cx, cy);
+    }
+    ctx.stroke();
+    // Bright side of the coil (specular)
+    ctx.strokeStyle = COLOR.METAL_LIGHT;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    for (let i = 0; i <= coils; i++) {
+      const t = i / coils;
+      const cy = coilTop + (coilBottom - coilTop) * t;
+      const cx = x + Math.sin(t * Math.PI * coils) * 4 - 1;
+      if (i === 0) ctx.moveTo(cx, cy);
+      else ctx.lineTo(cx, cy);
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    // Plunger head — chrome puck with red knob highlight.
+    ctx.save();
+    // Drop shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.beginPath();
+    ctx.roundRect(x - w / 2 + 2, y - h / 2 + 5, w, h, 6);
+    ctx.fill();
+
+    const headGrad = ctx.createLinearGradient(x, y - h / 2, x, y + h / 2);
+    headGrad.addColorStop(0, '#ff6075');
+    headGrad.addColorStop(0.5, '#d62a3e');
+    headGrad.addColorStop(1, '#5e0a18');
+    ctx.fillStyle = headGrad;
     ctx.beginPath();
     ctx.roundRect(x - w / 2, y - h / 2, w, h, 6);
     ctx.fill();
-
-    // Subtle highlight bar across the head.
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+    // Glossy stripe across the head.
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
     ctx.fillRect(x - w / 2 + 4, y - h / 2 + 4, w - 8, 2);
-
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.fillRect(x - w / 2 + 4, y - h / 2 + 7, w - 8, 1);
+    // Bottom shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.fillRect(x - w / 2 + 4, y + h / 2 - 4, w - 8, 2);
     ctx.restore();
   }
 }
