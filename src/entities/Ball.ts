@@ -3,12 +3,22 @@ import { BALL_RADIUS, BALL_MAX_SPEED, COLOR } from '../constants';
 
 export class Ball {
   readonly body: Matter.Body;
+  /** Number of consecutive frames the ball has been near-stationary;
+   *  used by the anti-stuck nudge in tick(). */
+  private stuckFrames = 0;
 
   constructor(x: number, y: number) {
     this.body = Matter.Bodies.circle(x, y, BALL_RADIUS, {
-      restitution: 0.42,
+      // Restitution lowered (was 0.42) so the ball settles instead of
+      // bouncing forever in the bottom playfield. 2D top-down pinball
+      // has no playfield friction, so a bouncy ball wedges in corners
+      // (the source of the right-inlane wedge bug).
+      restitution: 0.22,
       friction: 0.005,
-      frictionAir: 0.0008,
+      // More air drag (was 0.0008) so the ball loses kinetic energy
+      // gradually as it bounces around — feels like real playfield
+      // friction.
+      frictionAir: 0.0014,
       density: 0.0024,
       label: 'ball',
       slop: 0.01,
@@ -21,6 +31,31 @@ export class Ball {
     if (mag > BALL_MAX_SPEED) {
       const s = BALL_MAX_SPEED / mag;
       Matter.Body.setVelocity(this.body, { x: v.x * s, y: v.y * s });
+    }
+  }
+
+  /** Anti-stuck: 2D top-down pinball without playfield friction can get a
+   *  ball cradled against a curved surface (a slingshot corner, a bumper
+   *  edge, the bean) where gravity alone won't dislodge it. After ~1 s of
+   *  near-zero velocity, set the ball's velocity directly to nudge it
+   *  toward the bottom of the playfield. setVelocity is used instead of
+   *  applyForce because Matter forces are scaled by 1/mass and would need
+   *  to be huge to noticeably move the ball. */
+  unstickIfStalled() {
+    const v = this.body.velocity;
+    const mag = Math.hypot(v.x, v.y);
+    if (mag < 0.4) {
+      this.stuckFrames++;
+      if (this.stuckFrames > 60) {
+        // Pick a horizontal direction biased AWAY from whichever side of
+        // centre the ball is on, so a stuck ball moves toward play.
+        const sign = this.body.position.x < 270 ? +1 : -1;
+        Matter.Body.setVelocity(this.body, { x: sign * 3, y: 5 });
+        Matter.Body.setAngularVelocity(this.body, 0);
+        this.stuckFrames = 0;
+      }
+    } else {
+      this.stuckFrames = 0;
     }
   }
 

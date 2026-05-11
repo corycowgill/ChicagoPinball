@@ -11,6 +11,7 @@ export class Physics {
   readonly engine: Matter.Engine;
   readonly world: Matter.World;
   private handlers = new Map<string, CollisionHandler[]>();
+  private activeHandlers = new Map<string, CollisionHandler[]>();
   private deferred: Array<() => void> = [];
 
   constructor() {
@@ -33,6 +34,19 @@ export class Physics {
       }
     });
 
+    // Also fire `collisionActive` for handlers that need to repeatedly
+    // push a resting ball away (pop bumpers, slingshots, the bean) so the
+    // ball can't get cradled against a kicker. Routed through the same
+    // dispatch but flagged so handlers can choose whether to opt in via
+    // their own scoring policy (e.g. only score on collisionStart, only
+    // kick on collisionActive).
+    Matter.Events.on(this.engine, 'collisionActive', (evt) => {
+      for (const pair of evt.pairs) {
+        this.dispatchActive(pair.bodyA, pair.bodyB, pair);
+        this.dispatchActive(pair.bodyB, pair.bodyA, pair);
+      }
+    });
+
     Matter.Events.on(this.engine, 'afterUpdate', () => {
       const queue = this.deferred;
       this.deferred = [];
@@ -42,6 +56,12 @@ export class Physics {
 
   private dispatch(self: Matter.Body, other: Matter.Body, pair: Matter.Pair) {
     const list = this.handlers.get(self.label);
+    if (!list) return;
+    for (const fn of list) fn(self, other, pair);
+  }
+
+  private dispatchActive(self: Matter.Body, other: Matter.Body, pair: Matter.Pair) {
+    const list = this.activeHandlers.get(self.label);
     if (!list) return;
     for (const fn of list) fn(self, other, pair);
   }
@@ -59,6 +79,19 @@ export class Physics {
     if (!list) {
       list = [];
       this.handlers.set(label, list);
+    }
+    list.push(handler);
+  }
+
+  /** Register a handler that fires every frame the labelled body is in
+   *  contact with another body — used for "always-kick" interactions
+   *  like pop bumpers, slingshots and the bean, so a resting ball
+   *  doesn't stay cradled against them. */
+  onActive(label: string, handler: CollisionHandler) {
+    let list = this.activeHandlers.get(label);
+    if (!list) {
+      list = [];
+      this.activeHandlers.set(label, list);
     }
     list.push(handler);
   }

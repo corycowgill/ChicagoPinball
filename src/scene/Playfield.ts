@@ -298,7 +298,10 @@ export class Playfield {
     physics.beforeUpdate(() => {
       this.leftFlipper.tick();
       this.rightFlipper.tick();
-      for (const b of this.balls) b.capVelocity();
+      for (const b of this.balls) {
+        b.capVelocity();
+        b.unstickIfStalled();
+      }
       const revs = this.spinner.collectRevolutions();
       if (revs > 0) {
         this.events.onScore({ kind: 'spinner', points: POINTS.SPINNER_REV * revs });
@@ -314,6 +317,12 @@ export class Playfield {
       if (o.label !== 'ball') return;
       this.bean.pop(o);
       this.events.onScore({ kind: 'bean', points: POINTS.BEAN });
+    });
+    // Active-contact handler: keep pushing the ball away if it tries to
+    // rest against the bean. No score award (score only on first contact).
+    physics.onActive('bean', (_s, o) => {
+      if (o.label !== 'ball') return;
+      this.bean.pop(o);
     });
     physics.on('bean-lock', (_s, o) => {
       if (o.label !== 'ball') return;
@@ -335,11 +344,27 @@ export class Playfield {
       if (b) b.pop(o);
       this.events.onScore({ kind: 'pop-bumper', points: POINTS.POP_BUMPER });
     });
+    physics.onActive('pop-bumper', (self, o) => {
+      if (o.label !== 'ball') return;
+      // Only re-kick if the ball is going slowly (so we don't double-fire
+      // on a normal high-speed bounce).
+      const v = Math.hypot(o.velocity.x, o.velocity.y);
+      if (v > 4) return;
+      const b = this.popBumpers.find((p) => p.body === self);
+      if (b) b.pop(o);
+    });
     physics.on('slingshot', (self, o) => {
       if (o.label !== 'ball') return;
       const s = this.slingshots.find((sl) => sl.body === self);
       if (s) s.pop(o);
       this.events.onScore({ kind: 'slingshot', points: POINTS.SLINGSHOT });
+    });
+    physics.onActive('slingshot', (self, o) => {
+      if (o.label !== 'ball') return;
+      const v = Math.hypot(o.velocity.x, o.velocity.y);
+      if (v > 4) return;
+      const s = this.slingshots.find((sl) => sl.body === self);
+      if (s) s.pop(o);
     });
     for (const t of this.bank.targets) {
       physics.on(t.body.label, (self, o) => {
@@ -502,88 +527,37 @@ export class Playfield {
       this.addWall(div, polyOf(div), 'rail');
     }
 
-    // ── REAL INLANE / OUTLANE STRUCTURE ──
+    // ── BOTTOM PLAYFIELD GEOMETRY ──
     //
-    // Each side of the lower playfield has TWO channels:
-    //   OUTLANE  — between cabinet wall and the outlane inner wall;
-    //              ball that enters here goes straight to the drain.
-    //   INLANE   — between the outlane inner wall and the slingshot's
-    //              outer edge; ball that enters here is funnelled by an
-    //              angled diagonal at the bottom onto the flipper tip.
+    // After several attempts at 2-channel inlane/outlane structures (which
+    // kept producing wedge bugs because 2D top-down pinball has no
+    // playfield friction — balls bounce in narrow channels forever), the
+    // bottom is now SIMPLIFIED to the essentials:
     //
-    // Layout (left side, mirror for right):
-    //   cabinet @ x=0
-    //   outlane channel: x=12 → 32 (20 px wide)
-    //   outlane inner wall: x=34, vertical from y=400 to y=H-30
-    //   inlane channel: x=38 → 70 (32 px wide)
-    //   slingshot outer edge: x=70 (vertical from y=slingY-60 to slingY+26)
-    //   inlane diagonal: angled rail funnelling ball from outlane wall
-    //     bottom (~x=34, y=H-60) up-and-right to flipper tip (~x=130, y=H-180)
+    //   * Slingshot triangle (already created above) — its vertical OUTER
+    //     edge serves as the visual + physical "inlane wall"
+    //   * A single angled DEFLECTOR rail per side, anchored at the
+    //     slingshot's bottom-outer corner, sloping DOWN-IN to a point
+    //     above the flipper pivot. This catches a ball falling outside
+    //     the slingshot and redirects it onto the flipper bat.
+    //   * Open space outside the slingshot (between slingshot and the
+    //     cabinet wall) acts as the outlane — ball drains naturally.
     //
-    // The angled inlane diagonal acts as the FLOOR of the inlane — ball
-    // rolls down it onto the flipper. The outlane has no diagonal; ball
-    // just falls straight down into the drain.
+    // No vertical outlane walls and no inlane channel — the ball can
+    // always escape sideways, which prevents the corner-trap bug.
 
-    // OUTLANE INNER WALLS (vertical, define the divider between outlane
-    // and inlane channels).
-    const outlaneInnerX = 34;
-    const outlaneInnerXRight = this.playRight - outlaneInnerX;
-    const outlaneInnerY = (400 + H - 30) / 2;
-    const outlaneInnerLen = (H - 30) - 400;
-    {
-      const w = Matter.Bodies.rectangle(outlaneInnerX, outlaneInnerY, 4, outlaneInnerLen, {
-        isStatic: true, label: 'wall',
-      });
-      this.addWall(w, polyOf(w), 'rail');
-    }
-    {
-      const w = Matter.Bodies.rectangle(outlaneInnerXRight, outlaneInnerY, 4, outlaneInnerLen, {
-        isStatic: true, label: 'wall',
-      });
-      this.addWall(w, polyOf(w), 'rail');
-    }
+    const slingBotInnerL = this.playCenter - (this.flipperGap - 22);   // = 152
+    const slingBotInnerR = 2 * this.playCenter - slingBotInnerL;       // = 328
+    const slingBotY = this.flipperY - 64 + 28;                         // = 724
 
-    // OUTLANE TOP RAIL — short angled "roof" at the top of the outlane
-    // that prevents the ball from bouncing back UP out of the outlane.
-    // Slopes from the outer wall down to the outlane inner wall.
-    // (LEFT side: outer is the cabinet at x=12. RIGHT side: outer is the
-    // launch-lane separator at x=playRight, NOT the cabinet at W — the
-    // launch lane is on the far right of the canvas and is its own thing.)
     {
-      const x1 = 12;            const y1 = 400;
-      const x2 = outlaneInnerX; const y2 = 420;
-      const dx = x2 - x1, dy = y2 - y1;
-      const len = Math.hypot(dx, dy);
-      const w = Matter.Bodies.rectangle((x1 + x2) / 2, (y1 + y2) / 2, len, 4, {
-        isStatic: true, angle: Math.atan2(dy, dx), label: 'wall',
-      });
-      this.addWall(w, polyOf(w), 'rail');
-    }
-    {
-      const x1 = this.playRight;           const y1 = 400;
-      const x2 = outlaneInnerXRight;       const y2 = 420;
-      const dx = x2 - x1, dy = y2 - y1;
-      const len = Math.hypot(dx, dy);
-      const w = Matter.Bodies.rectangle((x1 + x2) / 2, (y1 + y2) / 2, len, 4, {
-        isStatic: true, angle: Math.atan2(dy, dx), label: 'wall',
-      });
-      this.addWall(w, polyOf(w), 'rail');
-    }
-
-    // INLANE DIAGONAL FLOOR — angled rail at the bottom of the inlane
-    // channel that catches the ball as it falls past the slingshot and
-    // delivers it ABOVE the flipper bat (NOT below — putting the endpoint
-    // below the bat means the ball arrives at the flipper's UNDERSIDE and
-    // goes through to the drain instead of landing on top of the bat,
-    // which was the user-reported "balls go through the right flipper"
-    // bug). The LOW end now sits at flipperY-30, so the ball lands ON TOP
-    // of the bat with a small drop, then can be cradled or flipped.
-    const inlaneTopY = this.flipperY - 50;       // well above slingshot bottom
-    const inlaneBotY = this.flipperY - 30;       // ABOVE the flipper bat top
-    {
-      // LEFT inlane: ball slides down-RIGHT toward left flipper pivot area.
-      const x1 = outlaneInnerX + 2;        const y1 = inlaneTopY;
-      const x2 = this.playCenter - this.flipperGap + 8; const y2 = inlaneBotY;
+      // LEFT deflector: from slingshot bottom-INNER corner DOWN-IN toward
+      // the left flipper pivot. Ball coming off the slingshot's live edge
+      // gets a controlled drop onto the flipper bat top.
+      const x1 = slingBotInnerL - 2;
+      const y1 = slingBotY + 2;
+      const x2 = this.playCenter - this.flipperGap + 4;
+      const y2 = this.flipperY - 16;
       const dx = x2 - x1, dy = y2 - y1;
       const len = Math.hypot(dx, dy);
       const w = Matter.Bodies.rectangle((x1 + x2) / 2, (y1 + y2) / 2, len, 6, {
@@ -592,9 +566,11 @@ export class Playfield {
       this.addWall(w, polyOf(w), 'rail');
     }
     {
-      // RIGHT inlane: ball slides down-LEFT toward right flipper pivot area.
-      const x1 = outlaneInnerXRight - 2;   const y1 = inlaneTopY;
-      const x2 = this.playCenter + this.flipperGap - 8; const y2 = inlaneBotY;
+      // RIGHT deflector: mirror.
+      const x1 = slingBotInnerR + 2;
+      const y1 = slingBotY + 2;
+      const x2 = this.playCenter + this.flipperGap - 4;
+      const y2 = this.flipperY - 16;
       const dx = x2 - x1, dy = y2 - y1;
       const len = Math.hypot(dx, dy);
       const w = Matter.Bodies.rectangle((x1 + x2) / 2, (y1 + y2) / 2, len, 6, {
@@ -603,14 +579,15 @@ export class Playfield {
       this.addWall(w, polyOf(w), 'rail');
     }
 
-    // ── Decorative metal posts at lane junctions. ──
+    // ── Decorative metal posts at the slingshot corners and flipper
+    //    pivots. These are the visible chrome posts that hold the rubbers
+    //    in place on a real playfield, and they help the player read the
+    //    flipper / slingshot geometry. ──
     this.postPositions = [
-      { x: outlaneInnerX, y: 400 },                  // top of left outlane wall
-      { x: outlaneInnerXRight, y: 400 },             // top of right outlane wall
-      { x: outlaneInnerX, y: H - 30 },               // bottom of left outlane wall
-      { x: outlaneInnerXRight, y: H - 30 },          // bottom of right outlane wall
-      { x: this.playCenter - this.flipperGap, y: this.flipperY - 6 }, // left flipper pivot post
-      { x: this.playCenter + this.flipperGap, y: this.flipperY - 6 }, // right flipper pivot post
+      { x: 70, y: this.flipperY - 28 },                                 // left slingshot top-outer
+      { x: this.playRight - 70, y: this.flipperY - 28 },                // right slingshot top-outer
+      { x: this.playCenter - this.flipperGap, y: this.flipperY - 6 },   // left flipper pivot
+      { x: this.playCenter + this.flipperGap, y: this.flipperY - 6 },   // right flipper pivot
     ];
   }
 
