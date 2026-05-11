@@ -121,16 +121,15 @@ export class Game {
   }
 
   private handleLockComplete() {
-    if (this.playfield.lock.locked >= 3) {
-      // Multiball start
+    if (this.playfield.bean.locked >= 3) {
+      // Multiball start — release all locked balls back into play.
       this.multiballActive = true;
       const released = this.playfield.releaseLocks();
       this.renderer.pushToast(`MULTIBALL × ${released + 1}`, COLOR.NEON_AMBER, 1600);
       this.renderer.triggerJackpotFlash();
     } else {
-      // Lock progress feedback
-      this.renderer.pushToast(`LOCK ${this.playfield.lock.locked} / 3`, COLOR.INSERT_RED, 900);
-      // Serve a fresh ball at the plunger.
+      // Lock progress feedback + serve a fresh ball.
+      this.renderer.pushToast(`LOCK ${this.playfield.bean.locked} / 3`, COLOR.INSERT_RED, 900);
       this.playfield.serveBall();
     }
   }

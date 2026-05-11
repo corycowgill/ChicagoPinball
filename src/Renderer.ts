@@ -72,22 +72,24 @@ export class Renderer {
   ) {
     this.drawBackbox(ctx);
     this.drawHUDBand(ctx, score, ballsRemaining, multiballActive, modeMsLeft, pf);
-    this.drawTopApron(ctx);
+    this.drawTopApron(ctx, pf);
     this.drawPlayfieldFloor(ctx);
-    // Habitrails go BENEATH the toys but above the floor.
-    this.drawHabitrails(ctx, pf);
-    // Decals printed on the playfield (under the toys).
+    // Decals printed on the playfield (beneath toys).
     this.drawPlayfieldDecals(ctx, pf);
-    // Centre ramp (translucent plate).
-    pf.centerRamp.draw(ctx);
+    // Lake Michigan water surround beneath its scoop.
+    this.drawLakeMichigan(ctx, pf);
+    // Ramps (raised translucent plates) — drawn before toys so toys layer on top.
+    pf.leftRamp.draw(ctx);
+    pf.rightRamp.draw(ctx);
     // Toys.
     pf.bank.draw(ctx);
     pf.captive.draw(ctx);
     pf.spinner.draw(ctx);
-    pf.scoop.draw(ctx);
-    pf.lock.draw(ctx);
+    pf.cityTourScoop.draw(ctx);
+    pf.lakeMichiganScoop.draw(ctx);
     for (const r of pf.rollovers) r.draw(ctx);
     for (const s of pf.standups) s.draw(ctx);
+    this.drawStandupLabels(ctx, pf);
     pf.bean.draw(ctx);
     for (const p of pf.popBumpers) p.draw(ctx);
     for (const s of pf.slingshots) s.draw(ctx);
@@ -379,31 +381,86 @@ export class Renderer {
 
   // ── Top apron (130 → 190) ──────────────────────────────────────────────
 
-  private drawTopApron(ctx: CanvasRenderingContext2D) {
+  private drawTopApron(ctx: CanvasRenderingContext2D, _pf: import('./scene/Playfield').Playfield) {
     const grad = ctx.createLinearGradient(0, APRON_TOP, 0, PLAYFIELD_TOP);
     grad.addColorStop(0, '#040814');
     grad.addColorStop(1, COLOR.PF_DARK);
     ctx.fillStyle = grad;
     ctx.fillRect(0, APRON_TOP, PLAYFIELD_W, PLAYFIELD_TOP - APRON_TOP);
 
-    // Decorative metallic back wall arch — defines the top edge of play.
-    const arcY = PLAYFIELD_TOP - 6;
-    const arcLeft = 28;
-    const arcRight = PLAYFIELD_W - 60;
-    strokeMetalPath(ctx, [
-      { x: arcLeft, y: arcY + 2 },
-      { x: arcLeft + 30, y: arcY - 8 },
-      { x: PLAYFIELD_W / 2, y: arcY - 12 },
-      { x: arcRight - 30, y: arcY - 8 },
-      { x: arcRight, y: arcY + 2 },
-    ], 4);
-
-    // "SKILL SHOT" decal between the arch and the rollover labels.
+    // "SKILL SHOT" big decal across the apron.
     ctx.save();
-    ctx.fillStyle = 'rgba(180, 220, 255, 0.55)';
-    ctx.font = 'bold 9px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillStyle = 'rgba(245, 250, 255, 0.85)';
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 4;
+    ctx.font = 'bold 12px "Helvetica Neue", Arial, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('★ SKILL SHOT ★', PLAYFIELD_W / 2, 152);
+    ctx.fillText('★  SKILL SHOT  ★', PLAYFIELD_W / 2, 158);
+    ctx.restore();
+
+    // Skill-shot point values printed above the rollover lanes.
+    const labels = ['10K', '25K', '10K'];
+    const xs = [120, _pf.playCenter, _pf.playRight - 120];
+    ctx.save();
+    ctx.font = 'bold 13px "Helvetica Neue", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 4;
+    for (let i = 0; i < 3; i++) {
+      ctx.fillStyle = COLOR.NEON_AMBER;
+      ctx.fillText(labels[i], xs[i], 184);
+    }
+    ctx.restore();
+  }
+
+  /** Bigger themed labels stacked ABOVE each Cubs/Bears/Bulls/Sox standup. */
+  private drawStandupLabels(ctx: CanvasRenderingContext2D, pf: import('./scene/Playfield').Playfield) {
+    const labels = [
+      { text: 'CUBS',  color: COLOR.INSERT_YELLOW, target: pf.standups[0] },
+      { text: 'BEARS', color: COLOR.INSERT_AMBER,  target: pf.standups[1] },
+      { text: 'BULLS', color: COLOR.INSERT_RED,    target: pf.standups[2] },
+      { text: 'SOX',   color: COLOR.INSERT_PURPLE, target: pf.standups[3] },
+    ];
+    ctx.save();
+    ctx.font = 'bold 11px "Helvetica Neue", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 5;
+    for (const { text, color, target } of labels) {
+      const x = target.body.position.x;
+      const y = target.body.position.y - 14;
+      ctx.fillStyle = color;
+      ctx.fillText(text, x, y);
+    }
+    ctx.restore();
+  }
+
+  /** Subtle blue water patch beneath the Lake Michigan scoop. */
+  private drawLakeMichigan(ctx: CanvasRenderingContext2D, pf: import('./scene/Playfield').Playfield) {
+    const cx = pf.lakeMichiganScoop.x;
+    const cy = pf.lakeMichiganScoop.y;
+    ctx.save();
+    const grad = ctx.createRadialGradient(cx, cy, 8, cx, cy, 60);
+    grad.addColorStop(0, 'rgba(78, 160, 216, 0.45)');
+    grad.addColorStop(1, 'rgba(31, 74, 122, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, 56, 48, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Wave shimmer
+    ctx.strokeStyle = 'rgba(120, 180, 220, 0.55)';
+    ctx.lineWidth = 1;
+    const t = performance.now() / 80;
+    for (let yy = cy - 30; yy < cy + 30; yy += 6) {
+      ctx.beginPath();
+      const wob = Math.sin((yy + t) / 14) * 4;
+      ctx.moveTo(cx - 36, yy + wob);
+      for (let xx = cx - 30; xx <= cx + 36; xx += 8) {
+        ctx.lineTo(xx, yy + Math.sin((xx + yy + t) / 12) * 1.4);
+      }
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
@@ -448,31 +505,33 @@ export class Renderer {
     ctx.fillRect(0, PLAYFIELD_TOP, PLAYFIELD_W, PLAYFIELD_H - PLAYFIELD_TOP);
   }
 
-  private drawHabitrails(ctx: CanvasRenderingContext2D, pf: Playfield) {
-    for (const h of pf.habitrails) {
-      strokeMetalPath(ctx, h.points, 5);
-    }
-  }
-
   private drawPlayfieldDecals(ctx: CanvasRenderingContext2D, pf: Playfield) {
     ctx.save();
-    ctx.font = 'bold 8px "Helvetica Neue", Arial, sans-serif';
+    ctx.font = 'bold 11px "Helvetica Neue", Arial, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
     ctx.shadowColor = '#000';
-    ctx.shadowBlur = 3;
-    // Major-toy labels positioned away from the toys themselves.
-    ctx.fillText('JACKPOT', pf.playCenter, 410);
-    ctx.fillText('LOCK', 70, 565);
-    ctx.fillText('CITY TOUR', pf.scoop.x, pf.scoop.y - 38);
-    ctx.fillText('LAKE MICHIGAN', 54, 670);
-    ctx.fillText('CAPTIVE', 95, 410);
-    // Sports-team standup labels (small, beside each target).
-    ctx.font = 'bold 7px "Helvetica Neue", Arial, sans-serif';
-    ctx.fillText('CUBS', 70, 282);
-    ctx.fillText('BEARS', 78, 342);
-    ctx.fillText('BULLS', pf.playRight - 70, 282);
-    ctx.fillText('SOX', pf.playRight - 78, 342);
+    ctx.shadowBlur = 4;
+
+    // SPELL CHICAGO label above the drop-target row.
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.fillText('SPELL  CHICAGO', pf.playCenter, 446);
+    ctx.font = '9px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillStyle = COLOR.INSERT_CYAN;
+    ctx.fillText('COMPLETE FOR MULTIBALL', pf.playCenter, 504);
+
+    // CITY TOUR scoop label.
+    ctx.font = 'bold 11px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillStyle = COLOR.INSERT_AMBER;
+    ctx.fillText('CITY  TOUR', pf.cityTourScoop.x, pf.cityTourScoop.y - 38);
+
+    // LAKE MICHIGAN scoop label.
+    ctx.fillStyle = COLOR.RIVER_HI;
+    ctx.fillText('LAKE  MICHIGAN', pf.lakeMichiganScoop.x + 4, pf.lakeMichiganScoop.y - 38);
+
+    // CAPTIVE BALL label.
+    ctx.fillStyle = COLOR.NEON_GREEN;
+    ctx.font = 'bold 9px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText('CAPTIVE', pf.captive.x, pf.captive.y - 22);
     ctx.restore();
   }
 

@@ -1,87 +1,95 @@
 import Matter from 'matter-js';
 import { COLOR } from '../constants';
+import { strokePlasticRamp, strokeMetalPath, insertArrow } from '../Graphics';
 
-/**
- * The Loop ramp: a sensor strip the ball passes through; entry + exit detect
- * a successful traversal.
- */
+/** A real raised ramp: an entry sensor at the bottom, an exit sensor at the
+ *  top, a curved translucent plastic plate connecting them, and a return
+ *  habitrail back to an inlane. When a ball enters the entry sensor moving
+ *  upward with sufficient speed, it's teleported to the exit and given a
+ *  velocity matching the habitrail return direction. */
 export class Ramp {
   readonly entry: Matter.Body;
   readonly exit: Matter.Body;
-  readonly path: { x: number; y: number }[];
-  private armed = false;
-  private armTimer = 0;
+  readonly plate: { x: number; y: number }[];
+  readonly habitrail: { x: number; y: number }[];
+  readonly returnVel: { x: number; y: number };
+  readonly color: string;
+  readonly arrowAt: { x: number; y: number };
+  readonly arrowAngle: number;
+  readonly label: string;
+  readonly themeText: string;
+  /** Minimum upward speed (px/step) for the ball to "make" the ramp. */
+  readonly minSpeed: number;
   private flash = 0;
 
   constructor(opts: {
     entry: { x: number; y: number };
     exit: { x: number; y: number };
-    path: { x: number; y: number }[];
+    plate: { x: number; y: number }[];
+    habitrail: { x: number; y: number }[];
+    returnVel: { x: number; y: number };
+    color: string;
+    arrowAt: { x: number; y: number };
+    arrowAngle: number;
+    label: string;
+    themeText: string;
+    minSpeed?: number;
   }) {
-    this.entry = Matter.Bodies.circle(opts.entry.x, opts.entry.y, 14, {
+    this.entry = Matter.Bodies.circle(opts.entry.x, opts.entry.y, 16, {
       isStatic: true,
       isSensor: true,
-      label: 'ramp-entry',
+      label: `${opts.label}-entry`,
     });
     this.exit = Matter.Bodies.circle(opts.exit.x, opts.exit.y, 14, {
       isStatic: true,
       isSensor: true,
-      label: 'ramp-exit',
+      label: `${opts.label}-exit`,
     });
-    this.path = opts.path;
+    this.plate = opts.plate;
+    this.habitrail = opts.habitrail;
+    this.returnVel = opts.returnVel;
+    this.color = opts.color;
+    this.arrowAt = opts.arrowAt;
+    this.arrowAngle = opts.arrowAngle;
+    this.label = opts.label;
+    this.themeText = opts.themeText;
+    this.minSpeed = opts.minSpeed ?? 9;
   }
 
-  arm() {
-    this.armed = true;
-    this.armTimer = 1800;
-  }
-
-  /** Returns true if a successful loop completed (entry then exit within window). */
-  triggerExit(): boolean {
-    if (this.armed) {
-      this.armed = false;
-      this.armTimer = 0;
-      this.flash = 1;
-      return true;
-    }
-    return false;
+  /** Try to "make" the ramp shot. If the ball's velocity is upward and fast
+   *  enough, it's teleported to the exit and the ball's velocity is set to
+   *  the habitrail return velocity. Returns true on a made shot. */
+  tryMake(ball: Matter.Body): boolean {
+    if (ball.velocity.y > -this.minSpeed) return false;
+    Matter.Body.setPosition(ball, { x: this.exit.position.x, y: this.exit.position.y });
+    Matter.Body.setVelocity(ball, { x: this.returnVel.x, y: this.returnVel.y });
+    Matter.Body.setAngularVelocity(ball, 0);
+    this.flash = 1;
+    return true;
   }
 
   tick(dtMs: number) {
-    if (this.armed) {
-      this.armTimer -= dtMs;
-      if (this.armTimer <= 0) this.armed = false;
-    }
-    if (this.flash > 0) this.flash = Math.max(0, this.flash - dtMs / 400);
+    if (this.flash > 0) this.flash = Math.max(0, this.flash - dtMs / 600);
   }
 
   draw(ctx: CanvasRenderingContext2D) {
+    // Glow when freshly made.
+    const alpha = 0.5 + this.flash * 0.4;
+    strokePlasticRamp(ctx, this.plate, this.color, 38, alpha);
+    // Habitrail return rail (chrome).
+    strokeMetalPath(ctx, this.habitrail, 5);
+    // Backlit arrow at the entry pointing up the ramp.
+    insertArrow(ctx, this.arrowAt.x, this.arrowAt.y, 14, this.arrowAngle, this.color, true);
+    // Theme text inside the ramp plate.
     ctx.save();
-    ctx.shadowColor = COLOR.NEON_AMBER;
-    ctx.shadowBlur = 14 + 18 * this.flash;
-    ctx.strokeStyle = this.armed
-      ? `rgba(255, 181, 71, ${0.85 + 0.15 * Math.sin(performance.now() / 80)})`
-      : `rgba(255, 181, 71, ${0.55 + 0.4 * this.flash})`;
-    ctx.lineWidth = 6;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(this.path[0].x, this.path[0].y);
-    for (let i = 1; i < this.path.length; i++) {
-      ctx.lineTo(this.path[i].x, this.path[i].y);
-    }
-    ctx.stroke();
-
-    // Entry/exit halos
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(this.entry.position.x, this.entry.position.y, 8, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(this.exit.position.x, this.exit.position.y, 8, 0, Math.PI * 2);
-    ctx.stroke();
-
+    const mid = this.plate[Math.floor(this.plate.length / 2)];
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 4;
+    ctx.font = 'bold 9px "Helvetica Neue", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(this.themeText, mid.x, mid.y);
     ctx.restore();
   }
 }

@@ -13,11 +13,28 @@ export class ChicagoBank {
   private resetTimer = 0;
   private orderBonusActive = true;
 
-  constructor(private physics: Physics, opts: { x: number; yTop: number; spacing: number }) {
+  constructor(private physics: Physics, opts: {
+    x: number;
+    yTop: number;
+    spacing: number;
+    horizontal?: boolean;
+    letterSpacing?: number;
+  }) {
     this.targets = [];
+    const horizontal = opts.horizontal ?? false;
+    const letterSpacing = opts.letterSpacing ?? 30;
     for (let i = 0; i < CHICAGO.length; i++) {
-      const t = new DropTarget(`${CHICAGO[i]}_${i}`, opts.x, opts.yTop + i * opts.spacing);
-      // override the label to include unique id, but keep visible letter
+      let x: number, y: number;
+      if (horizontal) {
+        // Centred horizontal row at (opts.x, opts.yTop), letterSpacing apart.
+        const totalW = (CHICAGO.length - 1) * letterSpacing;
+        x = opts.x - totalW / 2 + i * letterSpacing;
+        y = opts.yTop;
+      } else {
+        x = opts.x;
+        y = opts.yTop + i * opts.spacing;
+      }
+      const t = new DropTarget(`${CHICAGO[i]}_${i}`, x, y);
       (t as any).visibleLetter = CHICAGO[i];
       this.targets.push(t);
     }

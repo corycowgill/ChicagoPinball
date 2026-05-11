@@ -1,30 +1,42 @@
 import Matter from 'matter-js';
-import { COLOR } from '../constants';
-import { softShadow } from '../Graphics';
+import { COLOR, LOCKS_FOR_MULTIBALL } from '../constants';
+import { softShadow, insertCircle } from '../Graphics';
 
-/** Cloud Gate ("The Bean") at the top of the playfield. Rendered as a
- *  polished chrome ellipsoid with a sky reflection on top, an environmental
- *  reflection band, and the playfield reflected as a darker tone underneath. */
+/** Cloud Gate ("The Bean") at the centre of the upper playfield. Doubles as
+ *  the **multiball lock**: a ball that hits the Bean's hole at the base is
+ *  captured. Three captures arms multiball; the next captured ball releases
+ *  all three back into play. The visible Bean itself is a polished chrome
+ *  ellipsoid; the lock entrance is a small dark slot at its base. */
 export class Bean {
+  /** Hard chrome shell — ball bounces off the upper part of the dome. */
   readonly body: Matter.Body;
+  /** The lock-saucer sensor at the base of the bean. */
+  readonly lockSensor: Matter.Body;
   readonly radius: number;
+  locked = 0;
   private flash = 0;
 
-  constructor(x: number, y: number, radius = 62) {
+  constructor(public readonly cx: number, public readonly cy: number, radius = 38) {
     this.radius = radius;
-    this.body = Matter.Bodies.circle(x, y, radius, {
+    this.body = Matter.Bodies.circle(cx, cy, radius, {
       isStatic: true,
       restitution: 1.05,
       friction: 0,
       label: 'bean',
     });
+    // Lock saucer at the bottom of the bean (slot in the chrome).
+    this.lockSensor = Matter.Bodies.circle(cx, cy + radius - 4, 9, {
+      isStatic: true,
+      isSensor: true,
+      label: 'bean-lock',
+    });
   }
 
   pop(ball: Matter.Body) {
-    const dx = ball.position.x - this.body.position.x;
-    const dy = ball.position.y - this.body.position.y;
+    const dx = ball.position.x - this.cx;
+    const dy = ball.position.y - this.cy;
     const len = Math.hypot(dx, dy) || 1;
-    const force = 0.06 * ball.mass;
+    const force = 0.05 * ball.mass;
     Matter.Body.applyForce(ball, ball.position, {
       x: (dx / len) * force,
       y: (dy / len) * force,
@@ -32,30 +44,42 @@ export class Bean {
     this.flash = 1;
   }
 
+  /** Returns true if the lock accepted this ball. */
+  tryLock(): boolean {
+    if (this.locked >= LOCKS_FOR_MULTIBALL) return false;
+    this.locked++;
+    this.flash = 1;
+    return true;
+  }
+
+  releaseLocks() {
+    this.locked = 0;
+  }
+
   tick(dtMs: number) {
-    if (this.flash > 0) this.flash = Math.max(0, this.flash - dtMs / 240);
+    if (this.flash > 0) this.flash = Math.max(0, this.flash - dtMs / 280);
   }
 
   draw(ctx: CanvasRenderingContext2D) {
-    const { x, y } = this.body.position;
     const r = this.radius;
+    const x = this.cx;
+    const y = this.cy;
+
+    // Drop shadow
+    softShadow(ctx, x, y + r * 0.85, r * 1.15, r * 0.5, 0.7);
+
     ctx.save();
-
-    // Soft drop-shadow on the playfield underneath.
-    softShadow(ctx, x, y + r * 0.85, r * 1.15, r * 0.45, 0.65);
-
-    // Outer halo when flashing
     if (this.flash > 0.01) {
-      const halo = ctx.createRadialGradient(x, y, r * 0.5, x, y, r * 1.55);
-      halo.addColorStop(0, `rgba(150, 200, 255, ${0.5 * this.flash})`);
+      const halo = ctx.createRadialGradient(x, y, r * 0.5, x, y, r * 1.6);
+      halo.addColorStop(0, `rgba(150, 200, 255, ${0.55 * this.flash})`);
       halo.addColorStop(1, 'rgba(0, 0, 0, 0)');
       ctx.fillStyle = halo;
       ctx.beginPath();
-      ctx.arc(x, y, r * 1.55, 0, Math.PI * 2);
+      ctx.arc(x, y, r * 1.6, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Chrome body — base radial gradient (top-lit, dark below).
+    // Chrome dome
     const body = ctx.createRadialGradient(x - r * 0.4, y - r * 0.55, 1, x, y, r);
     body.addColorStop(0, COLOR.BEAN_HI);
     body.addColorStop(0.18, '#e0e6ee');
@@ -67,7 +91,7 @@ export class Bean {
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
 
-    // Sky-reflection cap on the upper third (very bright blue-white smear).
+    // Sky-reflection cap on the upper half.
     ctx.save();
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -80,16 +104,14 @@ export class Bean {
     ctx.fillRect(x - r, y - r, r * 2, r);
     ctx.restore();
 
-    // Mirror-line — the seam where the sky meets the city in the real Bean.
-    ctx.save();
+    // Equator mirror seam.
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.ellipse(x - r * 0.1, y - r * 0.15, r * 0.65, r * 0.18, -0.18, 0, Math.PI * 2);
+    ctx.ellipse(x - r * 0.1, y - r * 0.18, r * 0.65, r * 0.2, -0.18, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.restore();
 
-    // City-reflection band (warmer tones, lower half).
+    // City reflection lower half.
     ctx.save();
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -102,18 +124,38 @@ export class Bean {
     ctx.fillRect(x - r, y, r * 2, r);
     ctx.restore();
 
-    // Specular pip
+    // Specular pip.
     ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
     ctx.beginPath();
     ctx.ellipse(x - r * 0.32, y - r * 0.55, r * 0.18, r * 0.10, 0.4, 0, Math.PI * 2);
     ctx.fill();
 
-    // Dark ground notch under the dome.
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    // Lock slot at the base — a dark mouth where balls enter to be locked.
+    ctx.fillStyle = '#000';
     ctx.beginPath();
-    ctx.ellipse(x, y + r * 0.78, r * 0.85, r * 0.18, 0, 0, Math.PI * 2);
+    ctx.ellipse(x, y + r - 2, r * 0.32, r * 0.14, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = COLOR.METAL_DARK;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(x, y + r - 2, r * 0.32, r * 0.14, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
 
+    // Lock indicator lights — three dots above the bean (LOCK 1 / 2 / 3).
+    ctx.save();
+    ctx.font = 'bold 9px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillStyle = this.locked >= LOCKS_FOR_MULTIBALL ? COLOR.INSERT_AMBER : 'rgba(255, 255, 255, 0.55)';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 3;
+    ctx.fillText('BEAN LOCK', x, y - r - 18);
+    ctx.shadowBlur = 0;
+    for (let i = 0; i < LOCKS_FOR_MULTIBALL; i++) {
+      const lx = x - 14 + i * 14;
+      const ly = y - r - 6;
+      insertCircle(ctx, lx, ly, 5, COLOR.INSERT_RED, i < this.locked);
+    }
     ctx.restore();
   }
 }
