@@ -18,10 +18,6 @@ export class Flipper {
   private restAngle: number;
   private activeAngle: number;
   private side: FlipperSide;
-  /** Authoritative angle. The body's `angle` is forced to this value every
-   *  beforeUpdate AND afterUpdate so neither gravity nor constraint impulse
-   *  resolution can move it off. */
-  private currentAngle: number;
   private pivotX: number;
   private pivotY: number;
   /** Per-step rotation rate for kick / return. */
@@ -35,7 +31,6 @@ export class Flipper {
     this.pivotY = pivotY;
     this.restAngle = side === 'left' ? FLIPPER_REST_ANGLE : Math.PI - FLIPPER_REST_ANGLE;
     this.activeAngle = side === 'left' ? FLIPPER_ACTIVE_ANGLE : Math.PI - FLIPPER_ACTIVE_ANGLE;
-    this.currentAngle = this.restAngle;
 
     // Place body so its LEFT end (local x = -half) sits on the pivot when at restAngle.
     const half = FLIPPER_LEN / 2;
@@ -70,56 +65,58 @@ export class Flipper {
     this.active = v;
   }
 
-  /** Snap the body to the authoritative angle/position with consistent
-   *  velocity bookkeeping. Called from both beforeUpdate and afterUpdate. */
-  private commit(angularVel: number) {
-    const half = FLIPPER_LEN / 2;
-    const px = this.pivotX + Math.cos(this.currentAngle) * half;
-    const py = this.pivotY + Math.sin(this.currentAngle) * half;
-    // Order matters: setPosition / setAngle update vertices but not *Prev.
-    // Then setVelocity / setAngularVelocity update *Prev so Verlet integration
-    // reproduces the requested velocities (rather than computing phantom ones
-    // from the difference between the snapped pose and the last frame's pose).
-    Matter.Body.setPosition(this.body, { x: px, y: py });
-    Matter.Body.setAngle(this.body, this.currentAngle);
-    // Linear velocity at the body's centre = ω × r, where r is body-centre
-    // relative to pivot. Needed so a ball hit during a flip gets the right
-    // tangential impulse.
-    const rx = px - this.pivotX;
-    const ry = py - this.pivotY;
-    Matter.Body.setVelocity(this.body, { x: -angularVel * ry, y: angularVel * rx });
-    Matter.Body.setAngularVelocity(this.body, angularVel);
-  }
-
-  /** Step the authoritative angle toward its current target by at most one
-   *  per-frame increment, and write the resulting kinematic state to the body. */
+  /** Move the bat by setting ANGULAR VELOCITY rather than teleporting the
+   *  body's position. Letting Matter integrate the motion means a ball in
+   *  the bat's swept area gets collision-checked during the step (Matter's
+   *  discrete detector sees the bat AS IT MOVES THROUGH the ball's
+   *  position). The previous setPosition/setAngle approach teleported the
+   *  bat between frames — a ball mid-step could find itself with no bat
+   *  beside it at frame end, and Matter would record no collision (this
+   *  was the "balls go through the flippers" bug).
+   *
+   *  Drift correction is in `enforce()`. */
   tick() {
     const target = this.active ? this.activeAngle : this.restAngle;
-    const step = this.active ? this.kickStep : this.returnStep;
-    const diff = target - this.currentAngle;
-    let angularVel = 0;
-    if (Math.abs(diff) <= step) {
-      this.currentAngle = target;
+    const speed = this.active ? this.kickStep : this.returnStep;
+    const diff = target - this.body.angle;
+    if (Math.abs(diff) < speed * 0.5) {
+      // Within one step of target — hold still.
+      Matter.Body.setAngularVelocity(this.body, 0);
     } else {
-      const dir = Math.sign(diff);
-      this.currentAngle += dir * step;
-      angularVel = dir * step;
+      Matter.Body.setAngularVelocity(this.body, Math.sign(diff) * speed);
     }
-    this.commit(angularVel);
   }
 
-  /** Re-apply the authoritative pose after the engine integrates, so any
-   *  drift from gravity or contact resolution during the step is undone before
-   *  the frame is rendered. */
+  /** Run after the physics step. The pivot constraint keeps the bat anchored
+   *  but gravity + ball collisions can drift the angle past the valid range
+   *  and the position off the constraint anchor by a fraction of a pixel.
+   *  Clamp aggressively to the rest/active range, and snap position back
+   *  ONLY if drift exceeds a threshold (otherwise we'd be teleporting every
+   *  frame, which is exactly the bug we just fixed). */
   enforce() {
-    // Same target as last beforeUpdate — angle has already been advanced. Just
-    // re-pin the body to it without further angular advancement.
-    const angularVel = this.currentAngle === (this.active ? this.activeAngle : this.restAngle)
-      ? 0
-      : (this.active ? this.kickStep : this.returnStep) * Math.sign(
-          (this.active ? this.activeAngle : this.restAngle) - this.currentAngle,
-        );
-    this.commit(angularVel);
+    const lo = Math.min(this.restAngle, this.activeAngle);
+    const hi = Math.max(this.restAngle, this.activeAngle);
+    if (this.body.angle < lo) {
+      Matter.Body.setAngle(this.body, lo);
+      Matter.Body.setAngularVelocity(this.body, 0);
+    } else if (this.body.angle > hi) {
+      Matter.Body.setAngle(this.body, hi);
+      Matter.Body.setAngularVelocity(this.body, 0);
+    }
+    // Position drift correction — only snap if > 3 px off the expected
+    // anchor point. The constraint + the integrator should keep drift to
+    // sub-pixel under normal play; only a hard ball collision could push
+    // the bat enough to warrant a snap, and at that point it's safe
+    // because the ball has already had its impulse applied.
+    const half = FLIPPER_LEN / 2;
+    const expectedX = this.pivotX + Math.cos(this.body.angle) * half;
+    const expectedY = this.pivotY + Math.sin(this.body.angle) * half;
+    const dx = expectedX - this.body.position.x;
+    const dy = expectedY - this.body.position.y;
+    if (dx * dx + dy * dy > 9 /* 3 px squared */) {
+      Matter.Body.setPosition(this.body, { x: expectedX, y: expectedY });
+      Matter.Body.setVelocity(this.body, { x: 0, y: 0 });
+    }
   }
 
   draw(ctx: CanvasRenderingContext2D) {

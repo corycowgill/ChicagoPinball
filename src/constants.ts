@@ -4,18 +4,22 @@ export const PLAYFIELD_H = 960;
 export const WALL_THICKNESS = 24;
 
 export const BALL_RADIUS = 11;
-// Bumped from 22 — at the previous cap a maximum-power flipper shot peaked
-// at y≈400, which is BELOW the bumpers (y=320) and the Bean (y=280). Ball
-// could never reach the upper playfield from a flipper kick. At 27 the
-// ball can reach the top cabinet wall.
-export const BALL_MAX_SPEED = 27;
+// Capped BELOW the flipper-bat thickness (FLIPPER_HEIGHT = 28). A ball at
+// 27 px/step crossed a 26 px bat in one step — Matter's discrete
+// collision detection saw the ball outside the bat at frame start, outside
+// the bat at frame end (on the OTHER side), and registered no overlap. So
+// the ball literally tunnelled through the bat. With max speed 22, the
+// ball can never traverse the full 28 px bat in one step regardless of
+// approach angle.
+export const BALL_MAX_SPEED = 22;
 
 export const GRAVITY_Y = 0.95;
 
 export const FLIPPER_LEN = 108;
-// Thicker bat (was 20) — at 26 the ball can't tunnel between frames even at
-// max kick speed (kickStep × FLIPPER_LEN ≈ 17 px/frame at the tip < 26).
-export const FLIPPER_HEIGHT = 26;
+// Bat thickness must always exceed BALL_MAX_SPEED so Matter's discrete
+// collision detection can't miss a fast-moving ball passing through the
+// bat in one step. 28 > 22 gives 6 px of safety margin.
+export const FLIPPER_HEIGHT = 28;
 export const FLIPPER_REST_ANGLE = 0.42;
 export const FLIPPER_ACTIVE_ANGLE = -0.42;
 // Per-frame radian increments — see Flipper.ts. Tuned so the tip sweeps
