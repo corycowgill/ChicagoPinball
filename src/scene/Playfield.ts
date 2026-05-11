@@ -443,13 +443,15 @@ export class Playfield {
       if (o.label !== 'ball') return;
       if (o.velocity.y >= 0) return; // only upward-moving balls
       this.physics.defer(() => {
-        // Drop the ball over the LEFT rollover lane (the SKILL SHOT lane)
-        // with enough rightward velocity to carry it across the rollover
-        // row before falling. The ball then falls THROUGH the bumper
-        // triangle (between the two outer bumpers and onto the centre
-        // bumper) which kicks it into play with random direction.
-        Matter.Body.setPosition(o, { x: 120, y: PLAYFIELD_TOP + 4 });
-        Matter.Body.setVelocity(o, { x: 4, y: 3 });
+        // Drop the ball just ABOVE the LEFT skill-shot rollover lane
+        // (x=120) with a tiny rightward bias so it falls through the
+        // rollover sensor (10K skill shot) and then drifts toward the
+        // bumper triangle in the upper playfield. The horizontal bias
+        // is small enough that the ball still passes through the
+        // rollover but big enough that it doesn't fall straight down
+        // past everything to the slingshot.
+        Matter.Body.setPosition(o, { x: 120, y: PLAYFIELD_TOP });
+        Matter.Body.setVelocity(o, { x: 1.5, y: 4 });
         Matter.Body.setAngularVelocity(o, 0);
       });
     });
