@@ -4,7 +4,11 @@ export const PLAYFIELD_H = 960;
 export const WALL_THICKNESS = 24;
 
 export const BALL_RADIUS = 11;
-export const BALL_MAX_SPEED = 22;
+// Bumped from 22 — at the previous cap a maximum-power flipper shot peaked
+// at y≈400, which is BELOW the bumpers (y=320) and the Bean (y=280). Ball
+// could never reach the upper playfield from a flipper kick. At 27 the
+// ball can reach the top cabinet wall.
+export const BALL_MAX_SPEED = 27;
 
 export const GRAVITY_Y = 0.95;
 
@@ -14,11 +18,11 @@ export const FLIPPER_LEN = 108;
 export const FLIPPER_HEIGHT = 26;
 export const FLIPPER_REST_ANGLE = 0.42;
 export const FLIPPER_ACTIVE_ANGLE = -0.42;
-// Per-frame radian increments — see Flipper.ts. Reduced from 0.21/0.12 to
-// 0.16/0.10 to give Matter's collision detection more frames to register
-// flipper-vs-ball overlap during a kick (was a tunneling source).
-export const FLIPPER_KICK_VEL = 0.16;
-export const FLIPPER_RETURN_VEL = 0.10;
+// Per-frame radian increments — see Flipper.ts. Tuned so the tip sweeps
+// at 0.20 × 108 = 21.6 px/frame — fast enough to send a ball at the cap
+// (27 px/frame), still under the bat thickness (26) so no tunneling.
+export const FLIPPER_KICK_VEL = 0.20;
+export const FLIPPER_RETURN_VEL = 0.11;
 
 export const PLUNGER_MAX_PULL = 110;
 export const PLUNGER_KICK = 0.045;
