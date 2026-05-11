@@ -514,7 +514,7 @@ export class Renderer {
 
     // SPELL CHICAGO label above the drop-target row.
     ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
-    ctx.fillText('SPELL  CHICAGO', pf.playCenter, 446);
+    ctx.fillText('SPELL  CHICAGO', pf.playCenter + 90, 460);
     ctx.font = '9px "Helvetica Neue", Arial, sans-serif';
     ctx.fillStyle = COLOR.INSERT_CYAN;
     ctx.fillText('COMPLETE FOR MULTIBALL', pf.playCenter, 504);

@@ -151,11 +151,14 @@ export class Playfield {
     this.bean = new Bean(this.playCenter, 280, 26);
     physics.add(this.bean.body, this.bean.lockSensor);
 
-    // ── POP BUMPERS — triangle to the LEFT of the bean (clears the centre
-    //    so the centre ramp shot from the right flipper has a clean line). ──
-    this.popBumpers.push(new PopBumper(this.playCenter - 76, 320, 22, COLOR.INSERT_AMBER));
-    this.popBumpers.push(new PopBumper(this.playCenter + 76, 320, 22, COLOR.INSERT_RED));
-    this.popBumpers.push(new PopBumper(this.playCenter, 360, 22, COLOR.INSERT_BLUE));
+    // ── POP BUMPERS — triangle BELOW the Bean. Previously positioned so
+    //    the upper bumpers overlapped the Bean's collision body (Bean at
+    //    y=280-306, bumpers at y=298-342); a ball squeezed between them
+    //    could get cradled. Now placed clear of the Bean (y=340) and the
+    //    lock saucer below it (y=313).
+    this.popBumpers.push(new PopBumper(this.playCenter - 80, 360, 22, COLOR.INSERT_AMBER));
+    this.popBumpers.push(new PopBumper(this.playCenter + 80, 360, 22, COLOR.INSERT_RED));
+    this.popBumpers.push(new PopBumper(this.playCenter, 410, 22, COLOR.INSERT_BLUE));
     for (const p of this.popBumpers) physics.add(p.body);
 
     // ── SPORTS TEAM STANDUPS — 2-banks INSIDE the ramp curves (between the

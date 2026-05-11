@@ -15,11 +15,15 @@ export class CaptiveBall {
     public readonly y: number,
     public readonly laneLen = 60,
   ) {
-    // The captive ball itself.
+    // The captive ball itself. Restitution lowered (was 0.85) and air
+    // friction raised (was 0.02) so a struck captive ball settles back
+    // into the lane within a few bounces instead of rocketing out the
+    // open bottom and becoming a free ball in play (which would confuse
+    // the score / drain logic).
     this.ball = Matter.Bodies.circle(x + laneLen / 2 - 14, y, 11, {
-      restitution: 0.85,
-      friction: 0.005,
-      frictionAir: 0.02,
+      restitution: 0.55,
+      friction: 0.01,
+      frictionAir: 0.06,
       density: 0.0024,
       label: 'captive-ball',
     });

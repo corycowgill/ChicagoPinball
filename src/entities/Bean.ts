@@ -24,8 +24,12 @@ export class Bean {
       friction: 0,
       label: 'bean',
     });
-    // Lock saucer at the bottom of the bean (slot in the chrome).
-    this.lockSensor = Matter.Bodies.circle(cx, cy + radius - 4, 9, {
+    // Lock saucer just BELOW the bean body. Previously the sensor was
+    // placed inside the bean's collision area (cy + radius - 4) — the
+    // ball would bounce off the bean's chrome dome and never reach the
+    // sensor. Now it sits at cy + radius + 8 so a ball travelling along
+    // the bean's underside actually trips it.
+    this.lockSensor = Matter.Bodies.circle(cx, cy + radius + 8, 11, {
       isStatic: true,
       isSensor: true,
       label: 'bean-lock',
@@ -130,15 +134,27 @@ export class Bean {
     ctx.ellipse(x - r * 0.32, y - r * 0.55, r * 0.18, r * 0.10, 0.4, 0, Math.PI * 2);
     ctx.fill();
 
-    // Lock slot at the base — a dark mouth where balls enter to be locked.
+    ctx.restore();
+
+    // Lock saucer BELOW the bean (matches the lockSensor position) — a
+    // dark hole with chrome rim where the ball enters to be locked.
+    const slotX = x;
+    const slotY = y + r + 8;
+    ctx.save();
+    softShadow(ctx, slotX, slotY + 4, 14, 8, 0.6);
     ctx.fillStyle = '#000';
     ctx.beginPath();
-    ctx.ellipse(x, y + r - 2, r * 0.32, r * 0.14, 0, 0, Math.PI * 2);
+    ctx.ellipse(slotX, slotY, 12, 7, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = COLOR.METAL_DARK;
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = COLOR.METAL_MID;
     ctx.beginPath();
-    ctx.ellipse(x, y + r - 2, r * 0.32, r * 0.14, 0, 0, Math.PI * 2);
+    ctx.ellipse(slotX, slotY, 12, 7, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = COLOR.METAL_LIGHT;
+    ctx.beginPath();
+    ctx.ellipse(slotX, slotY - 1, 11, 5, 0, Math.PI, 0);
     ctx.stroke();
     ctx.restore();
 
