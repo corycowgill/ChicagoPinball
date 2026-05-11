@@ -141,7 +141,7 @@ export class Playfield {
     const rolloverXs = [120, this.playCenter, this.playRight - 120];
     const rolloverLetters = ['10K', '25K', '10K'];
     for (let i = 0; i < 3; i++) {
-      const r = new Rollover(rolloverXs[i], rolloverY, rolloverLetters[i]);
+      const r = new Rollover(rolloverXs[i], rolloverY, rolloverLetters[i], i);
       this.rollovers.push(r);
       physics.add(r.sensor);
     }
@@ -387,7 +387,11 @@ export class Playfield {
         if (o.label !== 'ball') return;
         if (!r.lit) {
           r.trigger();
-          this.events.onScore({ kind: 'spinner', points: 250 });
+          // Skill-shot value matches the on-playfield label (10K / 25K / 10K)
+          // instead of the previous flat 250 — earlier the rollover labels
+          // were lying to the player.
+          const points = r.letter === '25K' ? 25000 : 10000;
+          this.events.onScore({ kind: 'spinner', points });
         }
       });
     }

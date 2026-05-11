@@ -14,8 +14,16 @@ export class Rollover {
   lit = false;
   private flash = 0;
 
-  constructor(public readonly x: number, public readonly y: number, public readonly letter: string) {
-    this.label = `roll-${letter}`;
+  constructor(
+    public readonly x: number,
+    public readonly y: number,
+    public readonly letter: string,
+    public readonly idx: number = 0,
+  ) {
+    // Label includes the index so two rollovers with the same display
+    // letter (e.g. two "10K" lanes) still have distinct physics labels —
+    // otherwise triggering one would light both via shared dispatch.
+    this.label = `roll-${letter}-${idx}`;
     this.sensor = Matter.Bodies.rectangle(x, y, 26, 12, {
       isStatic: true,
       isSensor: true,
