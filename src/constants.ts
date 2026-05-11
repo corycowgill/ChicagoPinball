@@ -8,13 +8,13 @@ export const BALL_MAX_SPEED = 22;
 
 export const GRAVITY_Y = 0.95;
 
-export const FLIPPER_LEN = 96;
-export const FLIPPER_HEIGHT = 18;
+export const FLIPPER_LEN = 108;
+export const FLIPPER_HEIGHT = 20;
 export const FLIPPER_REST_ANGLE = 0.42;
 export const FLIPPER_ACTIVE_ANGLE = -0.42;
 // Per-frame radian increments — see Flipper.ts.
-export const FLIPPER_KICK_VEL = 0.2;
-export const FLIPPER_RETURN_VEL = 0.11;
+export const FLIPPER_KICK_VEL = 0.21;
+export const FLIPPER_RETURN_VEL = 0.12;
 
 export const PLUNGER_MAX_PULL = 110;
 export const PLUNGER_KICK = 0.045;

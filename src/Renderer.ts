@@ -1,7 +1,7 @@
 import { COLOR, PLAYFIELD_W, PLAYFIELD_H, CHICAGO } from './constants';
-import { Playfield } from './scene/Playfield';
+import { Playfield, PLAYFIELD_TOP } from './scene/Playfield';
 import { GameState } from './types';
-import { metalPost } from './Graphics';
+import { metalPost, strokeMetalPath } from './Graphics';
 
 interface Toast {
   text: string;
@@ -14,28 +14,35 @@ const IS_TOUCH =
   typeof window !== 'undefined' &&
   window.matchMedia?.('(hover: none) and (pointer: coarse)').matches === true;
 
+/** Vertical layout of the rendered surface (top → bottom):
+ *    0   ─ 60     Backbox art (skyline + landmarks only)
+ *    60  ─ 130    HUD band (score, status, CHICAGO progress)
+ *    130 ─ 190    Top apron (rollover lanes' decorative rail + back wall)
+ *    190 ─ 960    Playfield proper
+ */
+const BACKBOX_H = 60;
+const HUD_TOP = 60;
+const HUD_BOT = 130;
+const APRON_TOP = HUD_BOT;
+
 export class Renderer {
   private toasts: Toast[] = [];
   private flashJackpot = 0;
-  /** Procedurally-generated star field for the night sky. */
   private stars: { x: number; y: number; r: number; tw: number }[] = [];
-  /** Procedurally-generated city windows. */
   private windows: { x: number; y: number; w: number; h: number; lit: boolean }[] = [];
 
   constructor() {
-    // Stable seeded layout — same across all renders within this session.
     let seed = 1;
     const rand = () => {
       seed = (seed * 9301 + 49297) % 233280;
       return seed / 233280;
     };
-    for (let i = 0; i < 60; i++) {
-      this.stars.push({ x: rand() * PLAYFIELD_W, y: rand() * 130, r: rand() * 0.9 + 0.3, tw: rand() });
+    for (let i = 0; i < 70; i++) {
+      this.stars.push({ x: rand() * PLAYFIELD_W, y: rand() * BACKBOX_H, r: rand() * 0.9 + 0.3, tw: rand() });
     }
-    // Window grid for the city silhouette
     for (let bx = 30; bx < PLAYFIELD_W - 30; bx += 6) {
-      for (let by = 80; by < 200; by += 9) {
-        if (rand() < 0.2) {
+      for (let by = 16; by < BACKBOX_H - 4; by += 8) {
+        if (rand() < 0.16) {
           this.windows.push({ x: bx, y: by, w: 2, h: 2, lit: rand() < 0.7 });
         }
       }
@@ -45,10 +52,7 @@ export class Renderer {
   pushToast(text: string, color = COLOR.NEON_AMBER, ttl = 1400) {
     this.toasts.push({ text, color, ttl, total: ttl });
   }
-
-  triggerJackpotFlash() {
-    this.flashJackpot = 1500;
-  }
+  triggerJackpotFlash() { this.flashJackpot = 1500; }
 
   tick(dtMs: number) {
     for (const t of this.toasts) t.ttl -= dtMs;
@@ -66,42 +70,43 @@ export class Renderer {
     multiballActive: boolean,
     modeMsLeft: number,
   ) {
-    // Layer 1: backbox sky + city silhouette (above the playfield).
-    this.drawBackdrop(ctx);
-    // Layer 2: playfield wood + decals (beneath all toys).
-    this.drawPlayfieldFloor(ctx, pf);
-    // Layer 3: ramps and orbits (raised plastic / metal).
-    this.drawLanesAndRamps(ctx, pf);
-    // Layer 4: inserts and decals on the playfield surface.
-    this.drawInserts(ctx, pf);
-    // Layer 5: toys (bumpers, slings, scoop, lock, captive, bean, drop targets, spinner, flippers, plunger).
+    this.drawBackbox(ctx);
+    this.drawHUDBand(ctx, score, ballsRemaining, multiballActive, modeMsLeft, pf);
+    this.drawTopApron(ctx);
+    this.drawPlayfieldFloor(ctx);
+    // Habitrails go BENEATH the toys but above the floor.
+    this.drawHabitrails(ctx, pf);
+    // Decals printed on the playfield (under the toys).
+    this.drawPlayfieldDecals(ctx, pf);
+    // Centre ramp (translucent plate).
+    pf.centerRamp.draw(ctx);
+    // Toys.
     pf.bank.draw(ctx);
     pf.captive.draw(ctx);
     pf.spinner.draw(ctx);
     pf.scoop.draw(ctx);
     pf.lock.draw(ctx);
+    for (const r of pf.rollovers) r.draw(ctx);
+    for (const s of pf.standups) s.draw(ctx);
     pf.bean.draw(ctx);
     for (const p of pf.popBumpers) p.draw(ctx);
     for (const s of pf.slingshots) s.draw(ctx);
     pf.leftFlipper.draw(ctx);
     pf.rightFlipper.draw(ctx);
     pf.plunger.draw(ctx);
-    // Layer 6: walls outline (for railings).
+    // Walls + posts (steel).
     this.drawWalls(ctx, pf);
-    // Layer 7: chrome posts at junctions.
     for (const p of pf.postPositions) metalPost(ctx, p.x, p.y, p.r ?? 5);
-    // Layer 8: balls (always on top of toys).
+    // Balls last (always on top).
     for (const b of pf.balls) b.draw(ctx);
 
-    // HUD + overlays.
-    this.drawHUD(ctx, score, ballsRemaining, pf, state, multiballActive, modeMsLeft);
     this.drawToasts(ctx);
 
     if (this.flashJackpot > 0) {
       const a = Math.min(0.45, (this.flashJackpot / 1500) * 0.45);
       ctx.save();
       ctx.fillStyle = `rgba(255, 215, 100, ${a})`;
-      ctx.fillRect(0, 0, PLAYFIELD_W, PLAYFIELD_H);
+      ctx.fillRect(0, APRON_TOP, PLAYFIELD_W, PLAYFIELD_H - APRON_TOP);
       ctx.restore();
     }
 
@@ -110,65 +115,50 @@ export class Renderer {
     else if (state === GameState.READY) this.drawReadyHint(ctx, plungerHolding);
   }
 
-  // ── Layers ─────────────────────────────────────────────────────────────
+  // ── Backbox (top 60 px) ─────────────────────────────────────────────────
 
-  private drawBackdrop(ctx: CanvasRenderingContext2D) {
-    // Deep night sky
-    const grad = ctx.createLinearGradient(0, 0, 0, 220);
+  private drawBackbox(ctx: CanvasRenderingContext2D) {
+    const grad = ctx.createLinearGradient(0, 0, 0, BACKBOX_H);
     grad.addColorStop(0, COLOR.SKY_TOP);
     grad.addColorStop(1, '#040814');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, PLAYFIELD_W, 220);
+    ctx.fillRect(0, 0, PLAYFIELD_W, BACKBOX_H);
 
-    // Atmospheric glow over the city
-    const glow = ctx.createRadialGradient(PLAYFIELD_W / 2, 200, 50, PLAYFIELD_W / 2, 200, 220);
-    glow.addColorStop(0, 'rgba(80, 130, 220, 0.35)');
-    glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, PLAYFIELD_W, 220);
-
-    // Stars (twinkle)
     const t = performance.now() / 600;
     ctx.fillStyle = '#ffffff';
     for (const s of this.stars) {
-      const a = 0.4 + 0.5 * Math.sin(t + s.tw * 7);
-      ctx.globalAlpha = a;
+      ctx.globalAlpha = 0.4 + 0.5 * Math.sin(t + s.tw * 7);
       ctx.beginPath();
       ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
 
-    // City silhouette layers (back to front)
-    this.drawCityLayer(ctx, COLOR.CITY_DARK, 200, [
-      [0, 60], [40, 100], [70, 80], [100, 130], [140, 110], [170, 160],
-      [200, 140], [240, 130], [280, 90], [320, 110], [360, 140], [400, 100], [440, 130], [480, 110], [520, 140],
-    ]);
-
-    // Willis Tower — distinctive black tower with antenna, slightly right-of-center.
-    this.drawWillisTower(ctx, 305, 200);
-
-    // Ferris wheel (Navy Pier) — far left
-    this.drawFerrisWheel(ctx, 70, 175, 38);
-
-    // Front silhouette + windows
-    this.drawCityLayer(ctx, COLOR.CITY_LIT, 200, [
-      [0, 30], [30, 70], [60, 50], [90, 90], [120, 70], [150, 95],
-      [180, 75], [210, 105], [240, 95], [270, 60], [300, 80], [330, 100],
-      [360, 90], [390, 110], [420, 90], [450, 105], [480, 70], [510, 95], [540, 80],
-    ]);
-
-    // Windows
+    // Small tight skyline silhouette
+    this.drawCityLayer(ctx, COLOR.CITY_DARK, BACKBOX_H, [
+      [0, 14], [40, 24], [80, 18], [110, 30], [150, 25], [190, 36],
+      [230, 28], [270, 22], [310, 30], [350, 38], [390, 24], [430, 32], [470, 26], [510, 34],
+    ], 22);
+    this.drawWillisTower(ctx, 248, BACKBOX_H);
+    this.drawFerrisWheel(ctx, 70, BACKBOX_H - 18, 14);
+    this.drawCityLayer(ctx, COLOR.CITY_LIT, BACKBOX_H, [
+      [0, 8], [30, 18], [60, 12], [90, 22], [120, 16], [150, 24],
+      [180, 18], [210, 26], [240, 22], [280, 18], [310, 24],
+      [340, 20], [370, 28], [400, 22], [430, 26], [460, 18], [490, 24], [520, 20],
+    ], 22);
     for (const w of this.windows) {
       ctx.fillStyle = w.lit ? COLOR.WINDOW_LIGHT : COLOR.WINDOW_DIM;
       ctx.fillRect(w.x, w.y, w.w, w.h);
     }
-
-    // Chicago River bridge (Michigan Avenue style — twin bascule towers)
-    this.drawBridge(ctx, PLAYFIELD_W / 2, 200);
-
-    // CTA elevated train across the upper backbox
     this.drawCTATrain(ctx, performance.now());
+
+    // Bottom edge — chrome bezel between backbox and HUD.
+    ctx.fillStyle = COLOR.METAL_DARK;
+    ctx.fillRect(0, BACKBOX_H - 2, PLAYFIELD_W, 2);
+    ctx.fillStyle = COLOR.METAL_LIGHT;
+    ctx.globalAlpha = 0.55;
+    ctx.fillRect(0, BACKBOX_H - 1, PLAYFIELD_W, 0.6);
+    ctx.globalAlpha = 1;
   }
 
   private drawCityLayer(
@@ -176,13 +166,14 @@ export class Renderer {
     color: string,
     baseY: number,
     profile: number[][],
+    width = 28,
   ) {
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.moveTo(0, baseY);
     for (const [x, h] of profile) {
       ctx.lineTo(x, baseY - h);
-      ctx.lineTo(x + 28, baseY - h);
+      ctx.lineTo(x + width, baseY - h);
     }
     ctx.lineTo(PLAYFIELD_W, baseY);
     ctx.closePath();
@@ -191,28 +182,25 @@ export class Renderer {
 
   private drawWillisTower(ctx: CanvasRenderingContext2D, baseX: number, baseY: number) {
     ctx.save();
-    // Stepped tower silhouette
     ctx.fillStyle = '#020408';
-    ctx.fillRect(baseX, baseY - 165, 36, 165);
-    ctx.fillRect(baseX + 4, baseY - 175, 28, 30); // mid setback
-    ctx.fillRect(baseX + 10, baseY - 195, 16, 30); // upper setback
-    // Antenna spires
-    ctx.fillRect(baseX + 13, baseY - 220, 2, 25);
-    ctx.fillRect(baseX + 21, baseY - 215, 2, 20);
-    // Spire tip lights
+    ctx.fillRect(baseX, baseY - 50, 28, 50);
+    ctx.fillRect(baseX + 4, baseY - 56, 20, 8);
+    ctx.fillRect(baseX + 9, baseY - 64, 10, 10);
+    ctx.fillRect(baseX + 11, baseY - 76, 1, 13);
+    ctx.fillRect(baseX + 16, baseY - 73, 1, 9);
     ctx.fillStyle = COLOR.INSERT_RED;
     ctx.shadowColor = COLOR.INSERT_RED;
-    ctx.shadowBlur = 8;
-    ctx.fillRect(baseX + 13, baseY - 220, 2, 2);
-    ctx.fillRect(baseX + 21, baseY - 215, 2, 2);
+    ctx.shadowBlur = 6;
+    ctx.fillRect(baseX + 11, baseY - 76, 1.5, 1.5);
+    ctx.fillRect(baseX + 16, baseY - 73, 1.5, 1.5);
     ctx.shadowBlur = 0;
-    // Window grid on the main shaft
+    // Window glints
     ctx.fillStyle = COLOR.WINDOW_LIGHT;
-    for (let yy = baseY - 158; yy < baseY - 8; yy += 7) {
-      for (let xx = baseX + 3; xx < baseX + 33; xx += 5) {
-        if (((xx + yy) % 11 + 11) % 11 < 6) {
-          ctx.globalAlpha = 0.35 + ((xx * yy) % 7) * 0.06;
-          ctx.fillRect(xx, yy, 1.5, 1.5);
+    for (let yy = baseY - 46; yy < baseY - 4; yy += 5) {
+      for (let xx = baseX + 3; xx < baseX + 25; xx += 4) {
+        if (((xx + yy) % 11 + 11) % 11 < 5) {
+          ctx.globalAlpha = 0.3 + ((xx * yy) % 7) * 0.06;
+          ctx.fillRect(xx, yy, 1.2, 1.2);
         }
       }
     }
@@ -222,148 +210,220 @@ export class Renderer {
 
   private drawFerrisWheel(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
     ctx.save();
-    // Slow rotation
     const rot = performance.now() / 6000;
-    // Support legs
     ctx.strokeStyle = '#0a1124';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(cx - r * 0.85, cy + r);
-    ctx.lineTo(cx, cy);
-    ctx.lineTo(cx + r * 0.85, cy + r);
-    ctx.stroke();
-    // Wheel rim
-    ctx.strokeStyle = '#1a233a';
     ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx - r * 0.85, cy + r * 0.75);
+    ctx.lineTo(cx, cy);
+    ctx.lineTo(cx + r * 0.85, cy + r * 0.75);
+    ctx.stroke();
+    ctx.strokeStyle = '#1a233a';
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.stroke();
-    // Spokes + cars (lit dots at the rim)
-    const cars = 12;
+    const cars = 10;
     for (let i = 0; i < cars; i++) {
       const a = rot + (i / cars) * Math.PI * 2;
       const sx = cx + Math.cos(a) * r;
       const sy = cy + Math.sin(a) * r;
-      ctx.strokeStyle = 'rgba(40, 50, 80, 0.6)';
-      ctx.lineWidth = 0.8;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(sx, sy);
-      ctx.stroke();
-      // Car (lit)
       const hue = (i * 31) % 360;
       ctx.fillStyle = `hsl(${hue}, 90%, 65%)`;
       ctx.shadowColor = `hsl(${hue}, 90%, 65%)`;
-      ctx.shadowBlur = 5;
+      ctx.shadowBlur = 4;
       ctx.beginPath();
-      ctx.arc(sx, sy, 1.6, 0, Math.PI * 2);
+      ctx.arc(sx, sy, 1.3, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.shadowBlur = 0;
-    // Hub
-    ctx.fillStyle = COLOR.METAL_DARK;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  private drawBridge(ctx: CanvasRenderingContext2D, cx: number, baseY: number) {
-    ctx.save();
-    // Two short bascule towers at the river's edge
-    const towerH = 38;
-    const towerW = 8;
-    const span = 50;
-    ctx.fillStyle = '#080c1a';
-    ctx.fillRect(cx - span / 2 - towerW, baseY - towerH, towerW, towerH);
-    ctx.fillRect(cx + span / 2, baseY - towerH, towerW, towerH);
-    // Cross-cable indicating a bascule mechanism
-    ctx.strokeStyle = '#1a2236';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(cx - span / 2 - towerW + 1, baseY - towerH);
-    ctx.lineTo(cx + span / 2 + towerW - 1, baseY - towerH);
-    ctx.stroke();
-    // River beneath the bridge
-    const river = ctx.createLinearGradient(0, baseY - 2, 0, baseY + 16);
-    river.addColorStop(0, COLOR.RIVER_BLUE);
-    river.addColorStop(1, '#0c1a2e');
-    ctx.fillStyle = river;
-    ctx.fillRect(0, baseY - 2, PLAYFIELD_W, 18);
-    // River shimmer
-    ctx.strokeStyle = 'rgba(78, 160, 216, 0.55)';
-    ctx.lineWidth = 1;
-    const t = performance.now() / 80;
-    for (let yy = baseY + 2; yy < baseY + 14; yy += 4) {
-      ctx.beginPath();
-      const wob = Math.sin((yy + t) / 14) * 6;
-      for (let xx = 0; xx < PLAYFIELD_W; xx += 30) {
-        if (xx === 0) ctx.moveTo(xx, yy + wob);
-        else ctx.lineTo(xx, yy + Math.sin((xx + yy + t) / 11) * 1.5);
-      }
-      ctx.stroke();
-    }
     ctx.restore();
   }
 
   private drawCTATrain(ctx: CanvasRenderingContext2D, now: number) {
+    const trackY = 30;
     ctx.save();
-    // Elevated track at y=58 across the backbox.
-    const trackY = 56;
     ctx.strokeStyle = '#2a3450';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(0, trackY + 4);
-    ctx.lineTo(PLAYFIELD_W, trackY + 4);
+    ctx.moveTo(0, trackY);
+    ctx.lineTo(PLAYFIELD_W, trackY);
     ctx.stroke();
-    // Rail ties / supports
     ctx.strokeStyle = '#1a2236';
     ctx.lineWidth = 1;
     for (let xx = 8; xx < PLAYFIELD_W; xx += 18) {
       ctx.beginPath();
       ctx.moveTo(xx, trackY);
-      ctx.lineTo(xx, trackY + 16);
+      ctx.lineTo(xx, trackY + 12);
       ctx.stroke();
     }
-
-    // Train animation — moves left to right, wraps every 14s
     const period = 14000;
     const t = (now % period) / period;
-    const totalLen = PLAYFIELD_W + 200;
-    const trainX = -150 + t * totalLen;
-    const carW = 38;
-    const carH = 14;
+    const trainX = -150 + t * (PLAYFIELD_W + 200);
+    const carW = 32;
+    const carH = 11;
     const cars = 3;
     for (let i = 0; i < cars; i++) {
-      const x = trainX + i * (carW + 4);
+      const x = trainX + i * (carW + 3);
       ctx.fillStyle = '#5a6278';
       ctx.fillRect(x, trackY - carH, carW, carH);
-      // Window strip
       ctx.fillStyle = COLOR.WINDOW_LIGHT;
-      ctx.fillRect(x + 3, trackY - carH + 3, carW - 6, 4);
-      // Side highlight
+      ctx.fillRect(x + 3, trackY - carH + 3, carW - 6, 3);
       ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
       ctx.fillRect(x, trackY - carH, carW, 1);
     }
     ctx.restore();
   }
 
-  private drawPlayfieldFloor(ctx: CanvasRenderingContext2D, _pf: Playfield) {
-    // Playfield wood — dark gradient with subtle radial vignette.
-    const grad = ctx.createLinearGradient(0, 220, 0, PLAYFIELD_H);
+  // ── HUD band (60 → 130) ────────────────────────────────────────────────
+
+  private drawHUDBand(
+    ctx: CanvasRenderingContext2D,
+    score: number,
+    ballsRemaining: number,
+    multiballActive: boolean,
+    modeMsLeft: number,
+    pf: Playfield,
+  ) {
+    ctx.save();
+    // Brushed-steel HUD background
+    const grad = ctx.createLinearGradient(0, HUD_TOP, 0, HUD_BOT);
+    grad.addColorStop(0, '#161e2e');
+    grad.addColorStop(0.5, '#0c1322');
+    grad.addColorStop(1, '#0a0f1c');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, HUD_TOP, PLAYFIELD_W, HUD_BOT - HUD_TOP);
+
+    // Game-name plate (left)
+    ctx.shadowColor = COLOR.NEON_PINK;
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = COLOR.NEON_PINK;
+    ctx.font = 'bold 16px "Helvetica Neue", Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('CHICAGO', 12, HUD_TOP + 18);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = COLOR.TEXT_DIM;
+    ctx.font = '9px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText('THE WINDY CITY PINBALL', 12, HUD_TOP + 32);
+
+    // Score (right, BIG)
+    ctx.shadowColor = COLOR.NEON_AMBER;
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = COLOR.NEON_AMBER;
+    ctx.font = 'bold 30px "Helvetica Neue", Arial, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(score.toLocaleString(), PLAYFIELD_W - 12, HUD_TOP + 22);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = COLOR.TEXT_DIM;
+    ctx.font = '9px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText(`BALL ${Math.max(1, ballsRemaining)} / 3`, PLAYFIELD_W - 12, HUD_TOP + 40);
+
+    // Status pill — multiball or mode timer (centered upper)
+    if (multiballActive) {
+      this.statusPill(ctx, 'MULTIBALL', COLOR.NEON_AMBER, PLAYFIELD_W / 2, HUD_TOP + 16);
+    } else if (modeMsLeft > 0) {
+      this.statusPill(ctx, `MODE ${(modeMsLeft / 1000).toFixed(0)}s`, COLOR.INSERT_CYAN, PLAYFIELD_W / 2, HUD_TOP + 16);
+    }
+
+    // CHICAGO progress strip (bottom of HUD)
+    const lit = pf.bank.litMask();
+    const cellW = 22;
+    const totalW = CHICAGO.length * cellW + (CHICAGO.length - 1) * 4;
+    const startX = (PLAYFIELD_W - totalW) / 2;
+    for (let i = 0; i < CHICAGO.length; i++) {
+      const x = startX + i * (cellW + 4);
+      const cy = HUD_TOP + 56;
+      // Cell back
+      ctx.fillStyle = lit[i] ? '#0a3848' : '#0a1224';
+      ctx.fillRect(x, cy, cellW, 18);
+      ctx.shadowColor = COLOR.NEON_CYAN;
+      ctx.shadowBlur = lit[i] ? 16 : 0;
+      ctx.strokeStyle = lit[i] ? COLOR.NEON_CYAN : 'rgba(63, 240, 255, 0.3)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x, cy, cellW, 18);
+      ctx.fillStyle = lit[i] ? '#ffffff' : 'rgba(255, 255, 255, 0.45)';
+      ctx.font = 'bold 13px "Helvetica Neue", Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(CHICAGO[i], x + cellW / 2, cy + 9);
+    }
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+
+  private statusPill(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    color: string,
+    cx: number,
+    cy: number,
+  ) {
+    ctx.save();
+    ctx.font = 'bold 12px "Helvetica Neue", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const w = ctx.measureText(text).width + 18;
+    const h = 18;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = `rgba(${rgbOf(color)}, 0.18)`;
+    ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.2;
+    ctx.strokeRect(cx - w / 2, cy - h / 2, w, h);
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowBlur = 6;
+    ctx.fillText(text, cx, cy);
+    ctx.restore();
+  }
+
+  // ── Top apron (130 → 190) ──────────────────────────────────────────────
+
+  private drawTopApron(ctx: CanvasRenderingContext2D) {
+    const grad = ctx.createLinearGradient(0, APRON_TOP, 0, PLAYFIELD_TOP);
+    grad.addColorStop(0, '#040814');
+    grad.addColorStop(1, COLOR.PF_DARK);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, APRON_TOP, PLAYFIELD_W, PLAYFIELD_TOP - APRON_TOP);
+
+    // Decorative metallic back wall arch — defines the top edge of play.
+    const arcY = PLAYFIELD_TOP - 6;
+    const arcLeft = 28;
+    const arcRight = PLAYFIELD_W - 60;
+    strokeMetalPath(ctx, [
+      { x: arcLeft, y: arcY + 2 },
+      { x: arcLeft + 30, y: arcY - 8 },
+      { x: PLAYFIELD_W / 2, y: arcY - 12 },
+      { x: arcRight - 30, y: arcY - 8 },
+      { x: arcRight, y: arcY + 2 },
+    ], 4);
+
+    // "SKILL SHOT" decal between the arch and the rollover labels.
+    ctx.save();
+    ctx.fillStyle = 'rgba(180, 220, 255, 0.55)';
+    ctx.font = 'bold 9px "Helvetica Neue", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('★ SKILL SHOT ★', PLAYFIELD_W / 2, 152);
+    ctx.restore();
+  }
+
+  // ── Playfield surface ─────────────────────────────────────────────────
+
+  private drawPlayfieldFloor(ctx: CanvasRenderingContext2D) {
+    const grad = ctx.createLinearGradient(0, PLAYFIELD_TOP, 0, PLAYFIELD_H);
     grad.addColorStop(0, COLOR.PF_DARK);
     grad.addColorStop(0.5, COLOR.PF_MID);
     grad.addColorStop(1, COLOR.PF_DEEP);
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 220, PLAYFIELD_W, PLAYFIELD_H - 220);
+    ctx.fillRect(0, PLAYFIELD_TOP, PLAYFIELD_W, PLAYFIELD_H - PLAYFIELD_TOP);
 
-    // Faint wood-grain noise lines for texture.
+    // Subtle wood grain
     ctx.save();
-    ctx.globalAlpha = 0.08;
+    ctx.globalAlpha = 0.07;
     ctx.strokeStyle = '#3a5180';
     ctx.lineWidth = 0.5;
-    for (let i = 0; i < 20; i++) {
-      const yy = 230 + i * 36;
+    for (let i = 0; i < 22; i++) {
+      const yy = PLAYFIELD_TOP + 18 + i * 36;
       ctx.beginPath();
       ctx.moveTo(0, yy);
       for (let xx = 0; xx <= PLAYFIELD_W; xx += 22) {
@@ -376,35 +436,43 @@ export class Renderer {
     // Edge vignette
     const vg = ctx.createRadialGradient(
       PLAYFIELD_W / 2,
-      PLAYFIELD_H * 0.55,
+      PLAYFIELD_H * 0.6,
       PLAYFIELD_W * 0.35,
       PLAYFIELD_W / 2,
-      PLAYFIELD_H * 0.55,
+      PLAYFIELD_H * 0.6,
       PLAYFIELD_W * 1.1,
     );
     vg.addColorStop(0, 'rgba(0, 0, 0, 0)');
     vg.addColorStop(1, 'rgba(0, 0, 0, 0.65)');
     ctx.fillStyle = vg;
-    ctx.fillRect(0, 220, PLAYFIELD_W, PLAYFIELD_H - 220);
+    ctx.fillRect(0, PLAYFIELD_TOP, PLAYFIELD_W, PLAYFIELD_H - PLAYFIELD_TOP);
   }
 
-  private drawLanesAndRamps(ctx: CanvasRenderingContext2D, pf: Playfield) {
-    pf.leftOrbit.draw(ctx);
-    pf.rightOrbit.draw(ctx);
-    pf.centerRamp.draw(ctx);
+  private drawHabitrails(ctx: CanvasRenderingContext2D, pf: Playfield) {
+    for (const h of pf.habitrails) {
+      strokeMetalPath(ctx, h.points, 5);
+    }
   }
 
-  private drawInserts(ctx: CanvasRenderingContext2D, _pf: Playfield) {
-    // Decorative "MULTIBALL" / "MODE" / "JACKPOT" labels printed on the playfield.
+  private drawPlayfieldDecals(ctx: CanvasRenderingContext2D, pf: Playfield) {
     ctx.save();
-    ctx.font = 'bold 9px "Helvetica Neue", Arial, sans-serif';
-    ctx.fillStyle = 'rgba(120, 150, 200, 0.35)';
+    ctx.font = 'bold 8px "Helvetica Neue", Arial, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('JACKPOT', _pf.playCenter, 195);
-    ctx.fillText('MULTIBALL', _pf.playCenter, 568);
-    ctx.fillText('MODE', _pf.scoop.x, _pf.scoop.y - 50);
-    ctx.fillText('SPINNER', 78, 510);
-    ctx.fillText('LAKE MICHIGAN', 78, 528);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 3;
+    // Major-toy labels positioned away from the toys themselves.
+    ctx.fillText('JACKPOT', pf.playCenter, 410);
+    ctx.fillText('LOCK', 70, 565);
+    ctx.fillText('CITY TOUR', pf.scoop.x, pf.scoop.y - 38);
+    ctx.fillText('LAKE MICHIGAN', 54, 670);
+    ctx.fillText('CAPTIVE', 95, 410);
+    // Sports-team standup labels (small, beside each target).
+    ctx.font = 'bold 7px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText('CUBS', 70, 282);
+    ctx.fillText('BEARS', 78, 342);
+    ctx.fillText('BULLS', pf.playRight - 70, 282);
+    ctx.fillText('SOX', pf.playRight - 78, 342);
     ctx.restore();
   }
 
@@ -418,12 +486,9 @@ export class Renderer {
       for (let i = 1; i < verts.length; i++) ctx.lineTo(verts[i].x, verts[i].y);
       ctx.closePath();
       if (w.kind === 'wood') {
-        // Apron wood — warm brown gradient (drawn very subtly since outer
-        // walls fall outside the visible canvas anyway).
-        ctx.fillStyle = '#1a1410';
+        ctx.fillStyle = '#0a0a0e';
         ctx.fill();
       } else {
-        // Polished metal rail with shadow + highlight.
         ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
         ctx.shadowBlur = 6;
         ctx.fillStyle = '#0a1020';
@@ -432,8 +497,7 @@ export class Renderer {
         ctx.strokeStyle = COLOR.METAL_MID;
         ctx.lineWidth = 1.5;
         ctx.stroke();
-        // Inner highlight
-        ctx.strokeStyle = 'rgba(220, 230, 245, 0.3)';
+        ctx.strokeStyle = 'rgba(220, 230, 245, 0.32)';
         ctx.lineWidth = 0.6;
         ctx.stroke();
       }
@@ -441,93 +505,7 @@ export class Renderer {
     ctx.restore();
   }
 
-  // ── HUD ─────────────────────────────────────────────────────────────────
-
-  private drawHUD(
-    ctx: CanvasRenderingContext2D,
-    score: number,
-    ballsRemaining: number,
-    pf: Playfield,
-    state: GameState,
-    multiballActive: boolean,
-    modeMsLeft: number,
-  ) {
-    ctx.save();
-    // Top translucent banner
-    ctx.fillStyle = 'rgba(2, 4, 12, 0.78)';
-    ctx.fillRect(0, 0, PLAYFIELD_W, 28);
-    ctx.shadowColor = COLOR.NEON_PINK;
-    ctx.shadowBlur = 10;
-    ctx.fillStyle = COLOR.NEON_PINK;
-    ctx.font = 'bold 14px "Helvetica Neue", Arial, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('CHICAGO', 12, 14);
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = COLOR.TEXT_DIM;
-    ctx.font = '10px "Helvetica Neue", Arial, sans-serif';
-    ctx.fillText('THE WINDY CITY PINBALL', 90, 15);
-
-    // Score (right side, big amber)
-    ctx.shadowColor = COLOR.NEON_AMBER;
-    ctx.shadowBlur = 12;
-    ctx.fillStyle = COLOR.NEON_AMBER;
-    ctx.font = 'bold 20px "Helvetica Neue", Arial, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText(score.toLocaleString(), PLAYFIELD_W - 12, 14);
-
-    // Ball + status
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = COLOR.TEXT_DIM;
-    ctx.font = '11px "Helvetica Neue", Arial, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(`BALL ${Math.max(1, ballsRemaining)} / 3`, 12, 42);
-
-    if (multiballActive) {
-      ctx.shadowColor = COLOR.NEON_AMBER;
-      ctx.shadowBlur = 12;
-      ctx.fillStyle = COLOR.NEON_AMBER;
-      ctx.font = 'bold 11px "Helvetica Neue", Arial, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('★ MULTIBALL ★', PLAYFIELD_W / 2, 42);
-    } else if (modeMsLeft > 0) {
-      ctx.shadowColor = COLOR.INSERT_CYAN;
-      ctx.shadowBlur = 10;
-      ctx.fillStyle = COLOR.INSERT_CYAN;
-      ctx.font = 'bold 11px "Helvetica Neue", Arial, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(`MODE ${(modeMsLeft / 1000).toFixed(0)}s`, PLAYFIELD_W / 2, 42);
-    }
-
-    // CHICAGO progress strip (right of HUD)
-    const lit = pf.bank.litMask();
-    const startX = 230;
-    const cellW = 20;
-    for (let i = 0; i < CHICAGO.length; i++) {
-      const x = startX + i * (cellW + 3);
-      ctx.shadowBlur = lit[i] ? 14 : 0;
-      ctx.shadowColor = COLOR.NEON_CYAN;
-      ctx.strokeStyle = lit[i] ? COLOR.NEON_CYAN : 'rgba(63, 240, 255, 0.25)';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(x, 33, cellW, 18);
-      ctx.fillStyle = lit[i] ? COLOR.NEON_CYAN : 'rgba(63, 240, 255, 0.32)';
-      ctx.font = 'bold 12px "Helvetica Neue", Arial, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(CHICAGO[i], x + cellW / 2, 42);
-    }
-
-    // Hint
-    if (state === GameState.PLAYING) {
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = COLOR.TEXT_DIM;
-      ctx.font = '10px "Helvetica Neue", Arial, sans-serif';
-      ctx.textAlign = 'right';
-      ctx.fillText(IS_TOUCH ? 'TAP SIDES TO FLIP' : 'Z / ⁄ FLIPPERS', PLAYFIELD_W - 12, 42);
-    }
-
-    ctx.restore();
-  }
+  // ── Toasts + overlays ─────────────────────────────────────────────────
 
   private drawToasts(ctx: CanvasRenderingContext2D) {
     ctx.save();
@@ -539,10 +517,15 @@ export class Renderer {
       const offset = (1 - t.ttl / t.total) * -16;
       ctx.shadowColor = t.color;
       ctx.shadowBlur = 18;
-      ctx.fillStyle = t.color;
+      ctx.fillStyle = '#ffffff';
       ctx.globalAlpha = a;
       ctx.font = 'bold 22px "Helvetica Neue", Arial, sans-serif';
-      ctx.fillText(t.text, PLAYFIELD_W / 2, 600 + i * 28 + offset);
+      // Stronger contrast: white text with colored shadow.
+      ctx.fillText(t.text, PLAYFIELD_W / 2, 700 + i * 30 + offset);
+      ctx.fillStyle = t.color;
+      ctx.shadowBlur = 0;
+      ctx.font = 'bold 22px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText(t.text, PLAYFIELD_W / 2, 700 + i * 30 + offset);
       i++;
     }
     ctx.restore();
@@ -550,8 +533,8 @@ export class Renderer {
 
   private drawTitle(ctx: CanvasRenderingContext2D) {
     ctx.save();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-    ctx.fillRect(0, 0, PLAYFIELD_W, PLAYFIELD_H);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+    ctx.fillRect(0, APRON_TOP, PLAYFIELD_W, PLAYFIELD_H - APRON_TOP);
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -594,8 +577,8 @@ export class Renderer {
 
   private drawGameOver(ctx: CanvasRenderingContext2D, score: number) {
     ctx.save();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    ctx.fillRect(0, 0, PLAYFIELD_W, PLAYFIELD_H);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.fillRect(0, APRON_TOP, PLAYFIELD_W, PLAYFIELD_H - APRON_TOP);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.shadowColor = COLOR.NEON_PINK;
@@ -624,8 +607,8 @@ export class Renderer {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.shadowColor = COLOR.NEON_CYAN;
-    ctx.shadowBlur = 12;
-    ctx.fillStyle = COLOR.NEON_CYAN;
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 14px "Helvetica Neue", Arial, sans-serif';
     let msg: string;
     if (IS_TOUCH) msg = holding ? 'RELEASE TO LAUNCH' : 'TAP & HOLD TO PULL PLUNGER';
@@ -633,4 +616,11 @@ export class Renderer {
     ctx.fillText(msg, PLAYFIELD_W / 2, PLAYFIELD_H - 40);
     ctx.restore();
   }
+}
+
+function rgbOf(hex: string): string {
+  if (hex.startsWith('rgb')) return hex.slice(hex.indexOf('(') + 1, hex.indexOf(')'));
+  let h = hex.replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  return `${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)}`;
 }
