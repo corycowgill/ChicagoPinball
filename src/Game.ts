@@ -68,23 +68,23 @@ export class Game {
         this.renderer.pushToast('SUPER JACKPOT!', COLOR.NEON_AMBER, 1800);
         this.renderer.triggerJackpotFlash();
         break;
-      case 'left-orbit':
-        this.renderer.pushToast('LEFT ORBIT', COLOR.INSERT_CYAN, 700);
-        break;
-      case 'right-orbit':
-        this.renderer.pushToast('RIGHT ORBIT', COLOR.INSERT_BLUE, 700);
+      case 'skill-shot':
+        this.renderer.pushToast(`SKILL SHOT +${e.points.toLocaleString()}`, COLOR.NEON_AMBER, 1200);
         break;
       case 'center-ramp':
-        this.renderer.pushToast('CENTER RAMP', COLOR.INSERT_BLUE, 700);
+        this.renderer.pushToast('RAMP +' + e.points.toLocaleString(), COLOR.INSERT_BLUE, 700);
         break;
       case 'scoop':
-        this.renderer.pushToast('MODE START', COLOR.INSERT_AMBER, 1100);
+        this.renderer.pushToast('CITY TOUR MODE', COLOR.INSERT_AMBER, 1100);
+        break;
+      case 'lake-bonus':
+        this.renderer.pushToast('LAKE BONUS', COLOR.RIVER_HI, 900);
         break;
       case 'lock':
         this.renderer.pushToast('BALL LOCKED', COLOR.INSERT_RED, 900);
         break;
       case 'captive':
-        this.renderer.pushToast('CAPTIVE BALL', COLOR.NEON_GREEN, 600);
+        this.renderer.pushToast('CAPTIVE +' + e.points.toLocaleString(), COLOR.NEON_GREEN, 600);
         break;
       case 'drop-target':
         if (e.letter) this.renderer.pushToast(e.letter, COLOR.NEON_CYAN, 600);

@@ -387,11 +387,9 @@ export class Playfield {
         if (o.label !== 'ball') return;
         if (!r.lit) {
           r.trigger();
-          // Skill-shot value matches the on-playfield label (10K / 25K / 10K)
-          // instead of the previous flat 250 — earlier the rollover labels
-          // were lying to the player.
+          // Skill-shot value matches the on-playfield label (10K / 25K / 10K).
           const points = r.letter === '25K' ? 25000 : 10000;
-          this.events.onScore({ kind: 'spinner', points });
+          this.events.onScore({ kind: 'skill-shot', points });
         }
       });
     }
@@ -431,7 +429,7 @@ export class Playfield {
     physics.on('lake-scoop', (_s, o) => {
       if (o.label !== 'ball') return;
       if (this.lakeMichiganScoop.capture(o)) {
-        this.events.onScore({ kind: 'scoop', points: 1500 });
+        this.events.onScore({ kind: 'lake-bonus', points: 1500 });
       }
     });
     physics.on('drain', (_s, o) => {
