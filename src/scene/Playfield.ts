@@ -266,13 +266,12 @@ export class Playfield {
     this.cityTourScoop = new Scoop(this.playRight - 80, 540, -Math.PI / 2 - 0.3, 18);
     physics.add(this.cityTourScoop.sensor);
 
-    // ── CAPTIVE BALL lane — placed in the upper-RIGHT corner, just below
-    //    the right pop bumper and right standup bank. A left-flipper shot
-    //    aimed up-right (the classic Stern captive-ball line) reaches it
-    //    cleanly. The lane is horizontal with the open side facing DOWN,
-    //    so the player's ball strikes from below and the captive ball
-    //    transfers momentum across the short lane.
-    this.captive = new CaptiveBall(370, 430, 56);
+    // ── CAPTIVE BALL lane — far-RIGHT, between the right standup bank
+    //    and the inside edge of the right ramp. A left-flipper shot aimed
+    //    sharply up-right reaches it cleanly. The lane is horizontal with
+    //    the open side facing DOWN; the player's ball strikes from below
+    //    and the captive ball transfers momentum across the short lane.
+    this.captive = new CaptiveBall(this.playRight - 80, 430, 50);
     physics.add(this.captive.ball, ...this.captive.walls);
 
     // ── SPINNER — far-left inlane, classic spinner blade. ──

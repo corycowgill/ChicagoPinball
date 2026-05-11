@@ -93,13 +93,6 @@ export class CaptiveBall {
     ctx.arc(bx, by, 11, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
-
-    // Label
-    ctx.save();
-    ctx.fillStyle = this.flash > 0.05 ? COLOR.INSERT_AMBER : COLOR.TEXT_DIM;
-    ctx.font = 'bold 9px "Helvetica Neue", Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('CAPTIVE', this.x, this.y - 18);
-    ctx.restore();
+    // Label drawn by Renderer.drawPlayfieldDecals (one source of truth).
   }
 }

@@ -560,15 +560,18 @@ export class Renderer {
         ctx.fillStyle = '#0a0a0e';
         ctx.fill();
       } else {
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
-        ctx.shadowBlur = 6;
-        ctx.fillStyle = '#0a1020';
+        // Polished steel rail: dark fill + bright chrome outline + faint
+        // inner highlight stroke. Brightened so the lane structure reads
+        // even against the dark playfield.
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = '#1a2236';
         ctx.fill();
         ctx.shadowBlur = 0;
-        ctx.strokeStyle = COLOR.METAL_MID;
+        ctx.strokeStyle = COLOR.METAL_LIGHT;
         ctx.lineWidth = 1.5;
         ctx.stroke();
-        ctx.strokeStyle = 'rgba(220, 230, 245, 0.32)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
         ctx.lineWidth = 0.6;
         ctx.stroke();
       }
