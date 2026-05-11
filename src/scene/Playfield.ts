@@ -222,7 +222,7 @@ export class Playfield {
       arrowAt: { x: 200, y: 640 },
       arrowAngle: -Math.PI / 2 - 0.45,
       label: 'left-ramp',
-      themeText: 'WILLIS TOWER',
+      themeText: 'WILLIS',
       minSpeed: 6,
     });
     physics.add(this.leftRamp.entry, this.leftRamp.exit);
@@ -254,7 +254,7 @@ export class Playfield {
       arrowAt: { x: this.playCenter + 60, y: 640 },
       arrowAngle: -Math.PI / 2 + 0.45,
       label: 'right-ramp',
-      themeText: 'CTA LOOP',
+      themeText: 'CTA',
       minSpeed: 6,
     });
     physics.add(this.rightRamp.entry, this.rightRamp.exit);

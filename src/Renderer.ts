@@ -74,8 +74,6 @@ export class Renderer {
     this.drawHUDBand(ctx, score, ballsRemaining, multiballActive, modeMsLeft, pf);
     this.drawTopApron(ctx, pf);
     this.drawPlayfieldFloor(ctx);
-    // Decals printed on the playfield (beneath toys).
-    this.drawPlayfieldDecals(ctx, pf);
     // Lake Michigan water surround beneath its scoop.
     this.drawLakeMichigan(ctx, pf);
     // Ramps (raised translucent plates) — drawn before toys so toys layer on top.
@@ -89,13 +87,16 @@ export class Renderer {
     pf.lakeMichiganScoop.draw(ctx);
     for (const r of pf.rollovers) r.draw(ctx);
     for (const s of pf.standups) s.draw(ctx);
-    this.drawStandupLabels(ctx, pf);
     pf.bean.draw(ctx);
     for (const p of pf.popBumpers) p.draw(ctx);
     for (const s of pf.slingshots) s.draw(ctx);
     pf.leftFlipper.draw(ctx);
     pf.rightFlipper.draw(ctx);
     pf.plunger.draw(ctx);
+    // Decals (text labels) drawn LAST so they're never obscured by ramps,
+    // toys, or other rendered geometry.
+    this.drawPlayfieldDecals(ctx, pf);
+    this.drawStandupLabels(ctx, pf);
     // Walls + posts (steel).
     this.drawWalls(ctx, pf);
     for (const p of pf.postPositions) metalPost(ctx, p.x, p.y, p.r ?? 5);
@@ -510,23 +511,25 @@ export class Renderer {
     ctx.font = 'bold 11px "Helvetica Neue", Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.shadowColor = '#000';
-    ctx.shadowBlur = 4;
+    ctx.shadowBlur = 5;
 
-    // SPELL CHICAGO label above the drop-target row.
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
-    ctx.fillText('SPELL  CHICAGO', pf.playCenter + 90, 460);
-    ctx.font = '9px "Helvetica Neue", Arial, sans-serif';
+    // SPELL CHICAGO label centered directly ABOVE the drop-target row.
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.fillText('SPELL  CHICAGO', pf.playCenter, 450);
+    ctx.font = 'bold 9px "Helvetica Neue", Arial, sans-serif';
     ctx.fillStyle = COLOR.INSERT_CYAN;
     ctx.fillText('COMPLETE FOR MULTIBALL', pf.playCenter, 504);
 
-    // CITY TOUR scoop label.
-    ctx.font = 'bold 11px "Helvetica Neue", Arial, sans-serif';
-    ctx.fillStyle = COLOR.INSERT_AMBER;
-    ctx.fillText('CITY  TOUR', pf.cityTourScoop.x, pf.cityTourScoop.y - 38);
-
-    // LAKE MICHIGAN scoop label.
+    // Scoop labels: short single-word labels that fit cleanly under the
+    // saucer without colliding with the ramp plates or running off the
+    // canvas edge. Previously "LAKE MICHIGAN" + "CITY TOUR" were too long
+    // and overlapped the ramps; truncated to "LAKE" / "MODE" with the
+    // theme spelled out in the toast on capture.
+    ctx.font = 'bold 10px "Helvetica Neue", Arial, sans-serif';
     ctx.fillStyle = COLOR.RIVER_HI;
-    ctx.fillText('LAKE  MICHIGAN', pf.lakeMichiganScoop.x + 4, pf.lakeMichiganScoop.y - 38);
+    ctx.fillText('LAKE', pf.lakeMichiganScoop.x, pf.lakeMichiganScoop.y + 26);
+    ctx.fillStyle = COLOR.INSERT_AMBER;
+    ctx.fillText('MODE', pf.cityTourScoop.x, pf.cityTourScoop.y + 26);
 
     // CAPTIVE BALL label.
     ctx.fillStyle = COLOR.NEON_GREEN;
