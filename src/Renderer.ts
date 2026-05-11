@@ -513,7 +513,7 @@ export class Renderer {
     ctx.shadowBlur = 4;
 
     // SPELL CHICAGO label above the drop-target row.
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
     ctx.fillText('SPELL  CHICAGO', pf.playCenter, 446);
     ctx.font = '9px "Helvetica Neue", Arial, sans-serif';
     ctx.fillStyle = COLOR.INSERT_CYAN;
@@ -532,6 +532,18 @@ export class Renderer {
     ctx.fillStyle = COLOR.NEON_GREEN;
     ctx.font = 'bold 9px "Helvetica Neue", Arial, sans-serif';
     ctx.fillText('CAPTIVE', pf.captive.x, pf.captive.y - 22);
+
+    // ── LANE LABELS: small lit-insert decals printed in each outlane and
+    //    inlane so the player understands the bottom geometry.
+    ctx.font = 'bold 8px "Helvetica Neue", Arial, sans-serif';
+    // Outlanes (red — these drain the ball)
+    ctx.fillStyle = COLOR.INSERT_RED;
+    ctx.fillText('SPECIAL', 23, 750);
+    ctx.fillText('EXTRA', pf.playRight - 23, 750);
+    // Inlanes (cyan — these feed the flippers)
+    ctx.fillStyle = COLOR.INSERT_CYAN;
+    ctx.fillText('BONUS X', 60, 750);
+    ctx.fillText('RETURN', pf.playRight - 60, 750);
     ctx.restore();
   }
 
