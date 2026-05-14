@@ -45,6 +45,14 @@ export class Flipper {
       chamfer: { radius: FLIPPER_HEIGHT / 2 },
       label: side === 'left' ? 'flipper-left' : 'flipper-right',
     });
+    // Disable gravity on the bat. Constraint pins it at the pivot — the
+    // only purpose of gravity here would be to drift the bat off rest
+    // (the right flipper was settling 5-6° below rest because gravity
+    // torque imbalanced with the constraint solver). With gravity off,
+    // the bat only moves when we drive it via setAngularVelocity.
+    // body.gravityScale is a VECTOR in matter-js (not a scalar) — set both
+    // components to 0 so Matter.applyGravity sees the zero check and skips.
+    (this.body as unknown as { gravityScale: { x: number; y: number } }).gravityScale = { x: 0, y: 0 };
     Matter.Body.setAngle(this.body, this.restAngle);
 
     // The pivot constraint is still useful as a backup for ball-vs-flipper
@@ -90,31 +98,39 @@ export class Flipper {
   /** Run after the physics step. The pivot constraint keeps the bat anchored
    *  but gravity + ball collisions can drift the angle past the valid range
    *  and the position off the constraint anchor by a fraction of a pixel.
-   *  Clamp aggressively to the rest/active range, and snap position back
-   *  ONLY if drift exceeds a threshold (otherwise we'd be teleporting every
-   *  frame, which is exactly the bug we just fixed). */
+   *  When the bat is near its target angle (within 0.05 rad ≈ 3°), snap to
+   *  exact target so it doesn't visibly settle at a tilted-by-gravity rest.
+   *  Otherwise clamp to the valid [rest, active] range. */
   enforce() {
-    const lo = Math.min(this.restAngle, this.activeAngle);
-    const hi = Math.max(this.restAngle, this.activeAngle);
-    if (this.body.angle < lo) {
-      Matter.Body.setAngle(this.body, lo);
-      Matter.Body.setAngularVelocity(this.body, 0);
-    } else if (this.body.angle > hi) {
-      Matter.Body.setAngle(this.body, hi);
-      Matter.Body.setAngularVelocity(this.body, 0);
-    }
-    // Position drift correction — only snap if > 3 px off the expected
-    // anchor point. The constraint + the integrator should keep drift to
-    // sub-pixel under normal play; only a hard ball collision could push
-    // the bat enough to warrant a snap, and at that point it's safe
-    // because the ball has already had its impulse applied.
+    const target = this.active ? this.activeAngle : this.restAngle;
+    const diff = target - this.body.angle;
     const half = FLIPPER_LEN / 2;
-    const expectedX = this.pivotX + Math.cos(this.body.angle) * half;
-    const expectedY = this.pivotY + Math.sin(this.body.angle) * half;
-    const dx = expectedX - this.body.position.x;
-    const dy = expectedY - this.body.position.y;
-    if (dx * dx + dy * dy > 9 /* 3 px squared */) {
-      Matter.Body.setPosition(this.body, { x: expectedX, y: expectedY });
+    // Snap-to-target window: 0.15 rad (~8.6°) is enough to absorb the
+    // per-step drift introduced by the pivot constraint's position-
+    // correction impulses (observed up to ~7° on the right flipper at
+    // rest), but the corresponding tip motion (0.15 × 108 = 16.2 px)
+    // is well under the bat thickness 28 + ball diameter 22 = 50,
+    // so the snap can't tunnel through a ball even mid-swing.
+    if (Math.abs(diff) < 0.15) {
+      Matter.Body.setAngle(this.body, target);
+      Matter.Body.setPosition(this.body, {
+        x: this.pivotX + Math.cos(target) * half,
+        y: this.pivotY + Math.sin(target) * half,
+      });
+      Matter.Body.setAngularVelocity(this.body, 0);
+      Matter.Body.setVelocity(this.body, { x: 0, y: 0 });
+    } else {
+      // Mid-swing — clamp to the valid range and re-anchor position to
+      // the expected location.
+      const lo = Math.min(this.restAngle, this.activeAngle);
+      const hi = Math.max(this.restAngle, this.activeAngle);
+      let a = this.body.angle;
+      if (a < lo) { Matter.Body.setAngle(this.body, lo); a = lo; }
+      else if (a > hi) { Matter.Body.setAngle(this.body, hi); a = hi; }
+      Matter.Body.setPosition(this.body, {
+        x: this.pivotX + Math.cos(a) * half,
+        y: this.pivotY + Math.sin(a) * half,
+      });
       Matter.Body.setVelocity(this.body, { x: 0, y: 0 });
     }
   }
