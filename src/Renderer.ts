@@ -76,6 +76,13 @@ export class Renderer {
     this.drawPlayfieldFloor(ctx);
     // Lake Michigan water surround beneath its scoop.
     this.drawLakeMichigan(ctx, pf);
+    // Chrome shooter habitrail at the back of the playfield — visualises
+    // the path a launched ball "takes" off-screen from the shooter lane
+    // to its dump point in the upper playfield. (The ball itself is
+    // sensor-teleported; the rail is purely cosmetic continuity.)
+    for (const rail of pf.habitrails) {
+      strokeMetalPath(ctx, rail.points, 5);
+    }
     // Ramps (raised translucent plates) — drawn before toys so toys layer on top.
     pf.leftRamp.draw(ctx);
     pf.rightRamp.draw(ctx);
