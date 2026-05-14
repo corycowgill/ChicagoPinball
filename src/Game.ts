@@ -136,15 +136,24 @@ export class Game {
 
   private handleDrain(ball: Matter.Body) {
     if (this.state !== GameState.PLAYING) return;
-    // Remove the drained ball.
+    // Remove the drained ball (deferred so we don't mutate Matter mid-step).
     this.playfield.removeBall(ball);
 
-    // If multiball: when only 1 ball remains, multiball ends — but the
-    // remaining ball stays in play.
     if (this.multiballActive) {
-      // Use a deferred check after removal completes.
+      // Wait one tick for the deferred removal to take effect, then check
+      // how many balls remain. Three cases:
+      //   * 2+ balls — multiball continues
+      //   * 1 ball — multiball ends but normal play continues with that ball
+      //   * 0 balls — all multiball balls drained on the same frame; the
+      //     player loses this ball-in-play just like a normal drain
       setTimeout(() => {
-        if (this.playfield.balls.length <= 1) {
+        if (this.playfield.balls.length === 0) {
+          this.multiballActive = false;
+          this.renderer.pushToast('MULTIBALL OVER', COLOR.TEXT_DIM, 900);
+          this.state = GameState.BALL_DRAINED;
+          this.respawnTimer = 800;
+          this.ballsRemaining--;
+        } else if (this.playfield.balls.length === 1) {
           this.multiballActive = false;
           this.renderer.pushToast('MULTIBALL OVER', COLOR.TEXT_DIM, 900);
         }

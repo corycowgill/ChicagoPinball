@@ -666,18 +666,29 @@ export class Playfield {
   releaseLocks(): number {
     const count = this.bean.locked;
     this.bean.releaseLocks();
+    // Multiball balls spawn AT THE BEAN (their visual home) and fan out
+    // across the upper playfield with downward velocity. Previously they
+    // all spawned stacked at the plunger, which produced clipping and
+    // both balls would funnel into the same launch-exit sensor — second
+    // ball teleported onto the first. Spreading them spatially means
+    // they immediately drop into different play zones.
+    const spreadX = [-70, 0, +70];
+    const spreadVx = [-3, 0, +3];
     for (let i = 0; i < count; i++) {
       const b = this.serveBall();
-      Matter.Body.setPosition(b.body, { x: this.launchX, y: this.launchRestY - i * 22 });
-      Matter.Body.setVelocity(b.body, { x: 0, y: -20 - i * 2 });
+      Matter.Body.setPosition(b.body, {
+        x: this.bean.cx + (spreadX[i] ?? 0),
+        y: this.bean.cy + this.bean.radius + 24,
+      });
+      Matter.Body.setVelocity(b.body, {
+        x: spreadVx[i] ?? 0,
+        y: 4,
+      });
+      Matter.Body.setAngularVelocity(b.body, 0);
     }
     return count;
   }
 
-  /** Backwards-compatible alias for the multiball lock count (used by Game). */
-  get lock() {
-    return { locked: this.bean.locked };
-  }
 }
 
 function norm(v: { x: number; y: number }) {
