@@ -148,27 +148,9 @@ export class Bean {
 
     ctx.restore();
 
-    // Lock saucer BELOW the bean (matches the lockSensor position) — a
-    // dark hole with chrome rim where the ball enters to be locked.
-    const slotX = x;
-    const slotY = y + r + 8;
-    ctx.save();
-    softShadow(ctx, slotX, slotY + 4, 14, 8, 0.6);
-    ctx.fillStyle = '#000';
-    ctx.beginPath();
-    ctx.ellipse(slotX, slotY, 12, 7, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = COLOR.METAL_MID;
-    ctx.beginPath();
-    ctx.ellipse(slotX, slotY, 12, 7, 0, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = COLOR.METAL_LIGHT;
-    ctx.beginPath();
-    ctx.ellipse(slotX, slotY - 1, 11, 5, 0, Math.PI, 0);
-    ctx.stroke();
-    ctx.restore();
+    // (The saucer-style lock entrance was removed when the lock mechanic
+    // switched from sensor-entry to every-Nth-bean-hit — drawing a hole
+    // here was misleading, suggesting a target that doesn't exist.)
 
     // Lock indicator lights — three dots above the bean (LOCK 1 / 2 / 3).
     ctx.save();
