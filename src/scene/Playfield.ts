@@ -527,15 +527,18 @@ export class Playfield {
       ],
       tone: 'chrome',
     });
-    // Apron-side back wall — a short metal rail along the LEFT half of the
-    // playfield top that defines the upper playfield boundary on that side.
-    // The right half is intentionally OPEN so the launched ball can flow
-    // across the top from the shooter habitrail down into the playfield.
+    // Apron-side back wall — full-width metal rail just inside the apron,
+    // EXCLUDING the launch-lane area so a launched ball can still travel
+    // upward to trip the launch-exit sensor. Without this, balls flipped
+    // hard enough to apex above PLAYFIELD_TOP would visibly fly into the
+    // HUD band before falling back, then sometimes get caught in apron-
+    // area dead zones. Position is well above the rollover lanes (y=220)
+    // and above the launch-exit sensor (y=160) so neither is blocked.
     {
       const fromX = 6;
-      const toX = this.playCenter - 70;
+      const toX = this.laneInnerX - 4;
       const cx = (fromX + toX) / 2;
-      const div = Matter.Bodies.rectangle(cx, PLAYFIELD_TOP - 2, toX - fromX, 6, {
+      const div = Matter.Bodies.rectangle(cx, PLAYFIELD_TOP - 32, toX - fromX, 6, {
         isStatic: true, label: 'wall',
       });
       this.addWall(div, polyOf(div), 'rail');
