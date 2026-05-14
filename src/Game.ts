@@ -31,10 +31,15 @@ export class Game {
     }
   }
 
-  private resolveTouchKey(x: number, _y: number): VirtualKey | null {
+  private resolveTouchKey(x: number, y: number): VirtualKey | null {
     if (this.state === GameState.TITLE || this.state === GameState.GAME_OVER) return 'enter';
     if (this.state === GameState.READY) return 'plunger';
     if (this.state === GameState.BALL_DRAINED) return null;
+    // PLAYING — touch in the lower-RIGHT corner (over the launch lane and
+    // plunger) charges the plunger so the player can release a locked-lock
+    // served ball or a fresh respawn without breaking the flipper rhythm.
+    // Everywhere else still maps to flippers.
+    if (x > PLAYFIELD_W - 70 && y > 600) return 'plunger';
     return x < PLAYFIELD_W / 2 ? 'leftFlipper' : 'rightFlipper';
   }
 
