@@ -322,16 +322,11 @@ export class Playfield {
       if (o.label !== 'ball') return;
       this.bean.pop(o);
       this.events.onScore({ kind: 'bean', points: POINTS.BEAN });
-    });
-    // Active-contact handler: keep pushing the ball away if it tries to
-    // rest against the bean. No score award (score only on first contact).
-    physics.onActive('bean', (_s, o) => {
-      if (o.label !== 'ball') return;
-      this.bean.pop(o);
-    });
-    physics.on('bean-lock', (_s, o) => {
-      if (o.label !== 'ball') return;
-      if (this.bean.tryLock()) {
+      // Bean as multiball-lock toy: every Nth bean hit also fires a LOCK.
+      // The dedicated `bean-lock` sensor below the dome is unreachable
+      // because the dome's collision body blocks it, so we drive locks off
+      // of bean-hit count instead.
+      if (this.bean.registerHit()) {
         this.events.onScore({ kind: 'lock', points: POINTS.LOCK });
         const ball = this.balls.find((b) => b.body === o);
         if (ball) {
@@ -343,6 +338,14 @@ export class Playfield {
         }
       }
     });
+    // Active-contact handler: keep pushing the ball away if it tries to
+    // rest against the bean. No score award (score only on first contact).
+    physics.onActive('bean', (_s, o) => {
+      if (o.label !== 'ball') return;
+      this.bean.pop(o);
+    });
+    // (Legacy 'bean-lock' sensor handler removed — locks fire via
+    // registerHit() in the 'bean' handler above.)
     physics.on('pop-bumper', (self, o) => {
       if (o.label !== 'ball') return;
       const b = this.popBumpers.find((p) => p.body === self);

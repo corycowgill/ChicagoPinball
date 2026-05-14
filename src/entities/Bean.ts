@@ -3,17 +3,22 @@ import { COLOR, LOCKS_FOR_MULTIBALL } from '../constants';
 import { softShadow, insertCircle } from '../Graphics';
 
 /** Cloud Gate ("The Bean") at the centre of the upper playfield. Doubles as
- *  the **multiball lock**: a ball that hits the Bean's hole at the base is
- *  captured. Three captures arms multiball; the next captured ball releases
- *  all three back into play. The visible Bean itself is a polished chrome
- *  ellipsoid; the lock entrance is a small dark slot at its base. */
+ *  the **multiball lock**: every Nth bean hit (HITS_PER_LOCK = 4) captures a
+ *  ball. After three captures multiball starts. Earlier the lock was a
+ *  separate sensor under the bean dome, but the dome's collision body sat
+ *  in front of it — a ball couldn't physically reach the sensor without
+ *  going through the bean. Now the bean ITSELF counts hits and decides
+ *  when to lock, so the mechanic actually triggers during normal play. */
 export class Bean {
-  /** Hard chrome shell — ball bounces off the upper part of the dome. */
+  /** Hard chrome shell — ball bounces off the dome. */
   readonly body: Matter.Body;
-  /** The lock-saucer sensor at the base of the bean. */
+  /** No longer a separate sensor — kept as an empty stub so consumers
+   *  that reference it (collision dispatch wiring) don't have to special-case. */
   readonly lockSensor: Matter.Body;
   readonly radius: number;
   locked = 0;
+  private hitsSinceLastLock = 0;
+  static readonly HITS_PER_LOCK = 4;
   private flash = 0;
 
   constructor(public readonly cx: number, public readonly cy: number, radius = 38) {
@@ -24,16 +29,30 @@ export class Bean {
       friction: 0,
       label: 'bean',
     });
-    // Lock saucer just BELOW the bean body. Previously the sensor was
-    // placed inside the bean's collision area (cy + radius - 4) — the
-    // ball would bounce off the bean's chrome dome and never reach the
-    // sensor. Now it sits at cy + radius + 8 so a ball travelling along
-    // the bean's underside actually trips it.
-    this.lockSensor = Matter.Bodies.circle(cx, cy + radius + 8, 11, {
+    // Stub sensor placed off-playfield — kept so existing physics.on('bean-lock')
+    // registration doesn't error, but it'll never fire.
+    this.lockSensor = Matter.Bodies.circle(-100, -100, 1, {
       isStatic: true,
       isSensor: true,
       label: 'bean-lock',
     });
+  }
+
+  /** Returns true if THIS hit should also count as a lock. The caller is
+   *  responsible for removing the player ball + advancing lock state. */
+  registerHit(): boolean {
+    if (this.locked >= LOCKS_FOR_MULTIBALL) {
+      // All slots filled — bean is just a bumper until multiball releases.
+      return false;
+    }
+    this.hitsSinceLastLock++;
+    if (this.hitsSinceLastLock >= Bean.HITS_PER_LOCK) {
+      this.hitsSinceLastLock = 0;
+      this.locked++;
+      this.flash = 1;
+      return true;
+    }
+    return false;
   }
 
   pop(ball: Matter.Body) {
@@ -48,16 +67,9 @@ export class Bean {
     this.flash = 1;
   }
 
-  /** Returns true if the lock accepted this ball. */
-  tryLock(): boolean {
-    if (this.locked >= LOCKS_FOR_MULTIBALL) return false;
-    this.locked++;
-    this.flash = 1;
-    return true;
-  }
-
   releaseLocks() {
     this.locked = 0;
+    this.hitsSinceLastLock = 0;
   }
 
   tick(dtMs: number) {
