@@ -3,8 +3,19 @@ import { CHICAGO, POINTS } from '../constants';
 import { DropTarget } from './DropTarget';
 import { Physics } from '../Physics';
 
+export interface BankSlot {
+  x: number;
+  y: number;
+  angle: number;
+}
+
+/** The seven CHICAGO drop targets, laid out across two angled banks
+ *  ("CHI" on the left, "CAGO" on the right) so the centre of the playfield
+ *  stays open. Slot order must follow the CHICAGO spelling — the HUD strip
+ *  and the in-order bonus both index by letter position. */
 export class ChicagoBank {
-  readonly targets: DropTarget[];
+  readonly targets: DropTarget[] = [];
+  private byBody = new Map<Matter.Body, DropTarget>();
   /** Index of the next not-yet-hit letter required to spell CHICAGO in order. */
   private nextIdx = 0;
   /** Mask of letters knocked down (any order). */
@@ -13,48 +24,22 @@ export class ChicagoBank {
   private resetTimer = 0;
   private orderBonusActive = true;
 
-  constructor(private physics: Physics, opts: {
-    x: number;
-    yTop: number;
-    spacing: number;
-    horizontal?: boolean;
-    letterSpacing?: number;
-  }) {
-    this.targets = [];
-    const horizontal = opts.horizontal ?? false;
-    const letterSpacing = opts.letterSpacing ?? 30;
-    for (let i = 0; i < CHICAGO.length; i++) {
-      let x: number, y: number;
-      if (horizontal) {
-        // Centred horizontal row at (opts.x, opts.yTop), letterSpacing apart.
-        const totalW = (CHICAGO.length - 1) * letterSpacing;
-        x = opts.x - totalW / 2 + i * letterSpacing;
-        y = opts.yTop;
-      } else {
-        x = opts.x;
-        y = opts.yTop + i * opts.spacing;
-      }
-      const t = new DropTarget(`${CHICAGO[i]}_${i}`, x, y);
-      (t as any).visibleLetter = CHICAGO[i];
-      this.targets.push(t);
+  constructor(private physics: Physics, slots: BankSlot[]) {
+    if (slots.length !== CHICAGO.length) {
+      throw new Error(`ChicagoBank needs ${CHICAGO.length} slots, got ${slots.length}`);
     }
-    for (const t of this.targets) {
+    for (let i = 0; i < CHICAGO.length; i++) {
+      const s = slots[i];
+      const t = new DropTarget(`${CHICAGO[i]}${i}`, CHICAGO[i], s.x, s.y, s.angle);
+      this.targets.push(t);
+      this.byBody.set(t.body, t);
       physics.add(t.body);
-      // Customize the draw label
-      const visible = (t as any).visibleLetter;
-      t.draw = ((orig) =>
-        function (this: DropTarget, ctx: CanvasRenderingContext2D) {
-          const saved = (this as any).letter;
-          (this as any).letter = visible;
-          orig.call(this, ctx);
-          (this as any).letter = saved;
-        })(t.draw) as any;
     }
   }
 
   /** Returns score awarded (or 0 if no-op). */
   onHit(targetBody: Matter.Body): { points: number; superJackpot: boolean; letter: string } {
-    const target = (targetBody as any).$dropTarget as DropTarget | undefined;
+    const target = this.byBody.get(targetBody);
     if (!target || target.hit) return { points: 0, superJackpot: false, letter: '' };
     target.hit = true;
     const idx = this.targets.indexOf(target);
@@ -68,7 +53,7 @@ export class ChicagoBank {
       this.orderBonusActive = false;
     }
 
-    // Defer body removal until after current physics step.
+    // Defer body removal until after the current physics step.
     this.physics.defer(() => {
       this.physics.remove(target.body);
     });
@@ -80,7 +65,7 @@ export class ChicagoBank {
       this.resetTimer = 1500;
     }
 
-    return { points, superJackpot, letter: (target as any).visibleLetter };
+    return { points, superJackpot, letter: target.letter };
   }
 
   tick(dtMs: number) {

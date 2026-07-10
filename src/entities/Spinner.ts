@@ -51,23 +51,11 @@ export class Spinner {
   }
 
   draw(ctx: CanvasRenderingContext2D) {
-    // Lane backing — a recessed slot that shows the ball is in the spinner
-    // lane from above.
-    softShadow(ctx, this.cx, this.cy + 8, this.length / 1.6, 28, 0.45);
-    ctx.save();
-    const grad = ctx.createLinearGradient(this.cx - 30, this.cy, this.cx + 30, this.cy);
-    grad.addColorStop(0, '#06101e');
-    grad.addColorStop(0.5, '#020812');
-    grad.addColorStop(1, '#06101e');
-    ctx.fillStyle = grad;
-    ctx.fillRect(this.cx - 22, this.cy - 38, 44, 76);
-    ctx.strokeStyle = COLOR.METAL_DARK;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(this.cx - 22, this.cy - 38, 44, 76);
-    ctx.restore();
+    // Subtle recessed strip under the blade (the spinner sits in the left
+    // inlane, whose guide walls already frame it — no big slot needed).
+    softShadow(ctx, this.cx, this.cy + 4, this.length / 1.5, 10, 0.4);
 
     // Spinning blade with chrome shading
-    const verts = this.body.vertices;
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.body.angle);
@@ -84,7 +72,6 @@ export class Spinner {
     ctx.lineTo(this.length / 2 - 2, -2);
     ctx.stroke();
     ctx.restore();
-    void verts;
 
     // Pivot stud
     metalPost(ctx, this.cx, this.cy, 4);

@@ -2,27 +2,31 @@ import Matter from 'matter-js';
 import { COLOR } from '../constants';
 import { softShadow } from '../Graphics';
 
-/** A standup-style drop target — a small lit plate with a metal back. */
+/** A drop target — a small lit plate that drops out of play when hit. */
 export class DropTarget {
   readonly body: Matter.Body;
+  /** Letter printed on the face. */
   readonly letter: string;
   readonly home: { x: number; y: number; angle: number };
   hit = false;
 
-  constructor(letter: string, x: number, y: number, w = 28, h = 12, angle = 0) {
+  /** `id` must be unique across the table (used as the physics label);
+   *  `letter` is what's printed on the face and may repeat. */
+  constructor(id: string, letter: string, x: number, y: number, angle = 0, w = 28, h = 12) {
     this.letter = letter;
     this.home = { x, y, angle };
     this.body = Matter.Bodies.rectangle(x, y, w, h, {
       isStatic: true,
       restitution: 0.4,
       friction: 0,
-      label: `drop-${letter}`,
+      label: `drop-${id}`,
       angle,
     });
-    (this.body as any).$dropTarget = this;
   }
 
-  reset() { this.hit = false; }
+  reset() {
+    this.hit = false;
+  }
 
   draw(ctx: CanvasRenderingContext2D) {
     const cx = this.body.position.x;

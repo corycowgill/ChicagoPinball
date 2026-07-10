@@ -1,5 +1,5 @@
 import Matter from 'matter-js';
-import { COLOR, PLUNGER_KICK } from '../constants';
+import { COLOR } from '../constants';
 import { metalPost } from '../Graphics';
 
 export class Plunger {
@@ -24,12 +24,13 @@ export class Plunger {
     this.holding = true;
   }
 
+  /** Returns the pull fraction (0..1) at the moment of release. */
   release(): number {
     if (!this.holding) return 0;
-    const force = this.pull * PLUNGER_KICK;
+    const pull = this.pull;
     this.holding = false;
     this.pull = 0;
-    return force;
+    return pull;
   }
 
   tick(dtMs: number) {

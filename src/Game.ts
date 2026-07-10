@@ -35,10 +35,8 @@ export class Game {
     if (this.state === GameState.TITLE || this.state === GameState.GAME_OVER) return 'enter';
     if (this.state === GameState.READY) return 'plunger';
     if (this.state === GameState.BALL_DRAINED) return null;
-    // PLAYING — touch in the lower-RIGHT corner (over the launch lane and
-    // plunger) charges the plunger so the player can release a locked-lock
-    // served ball or a fresh respawn without breaking the flipper rhythm.
-    // Everywhere else still maps to flippers.
+    // PLAYING — touch in the lower-RIGHT corner (over the shooter lane)
+    // charges the plunger; everywhere else maps to flippers.
     if (x > PLAYFIELD_W - 70 && y > 600) return 'plunger';
     return x < PLAYFIELD_W / 2 ? 'leftFlipper' : 'rightFlipper';
   }
@@ -56,12 +54,12 @@ export class Game {
   private handleScore(e: ScoreEvent) {
     if (this.state !== GameState.PLAYING) return;
     let pts = e.points;
-    // Mode bonus: every shot during a mode pays a flat bonus on top.
+    // Mode bonus: every major shot during a mode pays a flat bonus on top.
     if (this.modeMsLeft > 0 && this.isModeShot(e.kind)) {
       pts += POINTS.MODE_SHOT;
       this.modeShots++;
     }
-    // Multiball jackpot: ramp / orbit / scoop hits during multiball pay big.
+    // Multiball jackpot: ramp / scoop hits during multiball pay big.
     if (this.multiballActive && this.isJackpotShot(e.kind)) {
       pts += POINTS.MULTIBALL_JACKPOT;
       this.renderer.pushToast('JACKPOT +' + POINTS.MULTIBALL_JACKPOT.toLocaleString(), COLOR.NEON_AMBER, 900);
@@ -76,7 +74,7 @@ export class Game {
       case 'skill-shot':
         this.renderer.pushToast(`SKILL SHOT +${e.points.toLocaleString()}`, COLOR.NEON_AMBER, 1200);
         break;
-      case 'center-ramp':
+      case 'ramp':
         this.renderer.pushToast('RAMP +' + e.points.toLocaleString(), COLOR.INSERT_BLUE, 700);
         break;
       case 'scoop':
@@ -103,20 +101,11 @@ export class Game {
   }
 
   private isModeShot(kind: ScoreEvent['kind']) {
-    return (
-      kind === 'left-orbit' ||
-      kind === 'right-orbit' ||
-      kind === 'center-ramp' ||
-      kind === 'scoop' ||
-      kind === 'captive' ||
-      kind === 'lock'
-    );
+    return kind === 'ramp' || kind === 'scoop' || kind === 'captive' || kind === 'lock';
   }
 
   private isJackpotShot(kind: ScoreEvent['kind']) {
-    return (
-      kind === 'left-orbit' || kind === 'right-orbit' || kind === 'center-ramp' || kind === 'scoop'
-    );
+    return kind === 'ramp' || kind === 'scoop';
   }
 
   private startMode() {
@@ -127,46 +116,38 @@ export class Game {
 
   private handleLockComplete() {
     if (this.playfield.bean.locked >= 3) {
-      // Multiball start — release all locked balls back into play.
+      // Multiball start — the locked balls fan out from the Bean.
       this.multiballActive = true;
       const released = this.playfield.releaseLocks();
-      this.renderer.pushToast(`MULTIBALL × ${released + 1}`, COLOR.NEON_AMBER, 1600);
+      this.renderer.pushToast(`MULTIBALL × ${released}`, COLOR.NEON_AMBER, 1600);
       this.renderer.triggerJackpotFlash();
     } else {
-      // Lock progress feedback + serve a fresh ball.
+      // Lock progress feedback + auto-serve a fresh ball.
       this.renderer.pushToast(`LOCK ${this.playfield.bean.locked} / 3`, COLOR.INSERT_RED, 900);
-      this.playfield.serveBall();
+      this.playfield.serveBall(true);
     }
   }
 
   private handleDrain(ball: Matter.Body) {
     if (this.state !== GameState.PLAYING) return;
-    // Remove the drained ball (deferred so we don't mutate Matter mid-step).
+    if (!this.playfield.hasBall(ball)) return; // already handled
+    // removeBall shrinks the ball list synchronously, so the counts below
+    // are exact even when several balls drain on the same frame.
     this.playfield.removeBall(ball);
+    const left = this.playfield.balls.length;
 
-    if (this.multiballActive) {
-      // Wait one tick for the deferred removal to take effect, then check
-      // how many balls remain. Three cases:
-      //   * 2+ balls — multiball continues
-      //   * 1 ball — multiball ends but normal play continues with that ball
-      //   * 0 balls — all multiball balls drained on the same frame; the
-      //     player loses this ball-in-play just like a normal drain
-      setTimeout(() => {
-        if (this.playfield.balls.length === 0) {
-          this.multiballActive = false;
-          this.renderer.pushToast('MULTIBALL OVER', COLOR.TEXT_DIM, 900);
-          this.state = GameState.BALL_DRAINED;
-          this.respawnTimer = 800;
-          this.ballsRemaining--;
-        } else if (this.playfield.balls.length === 1) {
-          this.multiballActive = false;
-          this.renderer.pushToast('MULTIBALL OVER', COLOR.TEXT_DIM, 900);
-        }
-      }, 30);
+    if (left >= 2) return; // multiball continues
+
+    if (left === 1) {
+      if (this.multiballActive) {
+        this.multiballActive = false;
+        this.renderer.pushToast('MULTIBALL OVER', COLOR.TEXT_DIM, 900);
+      }
       return;
     }
 
-    // Normal drain: lose a ball, trigger BALL_DRAINED state.
+    // Last ball gone — ball over.
+    this.multiballActive = false;
     this.state = GameState.BALL_DRAINED;
     this.respawnTimer = 800;
     this.ballsRemaining--;
@@ -195,13 +176,21 @@ export class Game {
     if (this.state === GameState.READY || this.state === GameState.PLAYING) {
       if (this.input.wasPressed('plunger')) this.playfield.plunger.hold();
       if (this.input.wasReleased('plunger')) {
-        const force = this.playfield.plunger.release();
-        this.playfield.applyPlungerLaunch(force);
-        if (this.state === GameState.READY && force > 0.005) this.state = GameState.PLAYING;
+        const pull = this.playfield.plunger.release();
+        this.playfield.applyPlungerLaunch(pull);
       }
     }
 
     this.physics.step(dtMs);
+
+    // READY → PLAYING only once the ball actually leaves the shooter lane
+    // (a weak plunge rolls back and the player just plunges again).
+    if (
+      this.state === GameState.READY &&
+      this.playfield.balls.some((b) => !this.playfield.isBallInLaunchLane(b.body))
+    ) {
+      this.state = GameState.PLAYING;
+    }
     this.playfield.tick(dtMs);
     this.renderer.tick(dtMs);
 

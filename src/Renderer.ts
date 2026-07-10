@@ -76,13 +76,10 @@ export class Renderer {
     this.drawPlayfieldFloor(ctx);
     // Lake Michigan water surround beneath its scoop.
     this.drawLakeMichigan(ctx, pf);
-    // Chrome shooter habitrail at the back of the playfield — visualises
-    // the path a launched ball "takes" off-screen from the shooter lane
-    // to its dump point in the upper playfield. (The ball itself is
-    // sensor-teleported; the rail is purely cosmetic continuity.)
-    for (const rail of pf.habitrails) {
-      strokeMetalPath(ctx, rail.points, 5);
-    }
+    // Chrome shooter wireform at the back of the playfield — the launched
+    // ball actually rides this path (see Playfield.shooterPath); drawn to
+    // the centre lane, the branch into the outer lanes is implied.
+    strokeMetalPath(ctx, pf.shooterPath(pf.rolloverXs[1]), 4);
     // Ramps (raised translucent plates) — drawn before toys so toys layer on top.
     pf.leftRamp.draw(ctx);
     pf.rightRamp.draw(ctx);
@@ -326,7 +323,8 @@ export class Renderer {
     ctx.shadowBlur = 0;
     ctx.fillStyle = COLOR.TEXT_DIM;
     ctx.font = '9px "Helvetica Neue", Arial, sans-serif';
-    ctx.fillText(`BALL ${Math.max(1, ballsRemaining)} / 3`, PLAYFIELD_W - 12, HUD_TOP + 40);
+    const ballNum = Math.min(3, Math.max(1, 3 - ballsRemaining + 1));
+    ctx.fillText(`BALL ${ballNum} / 3`, PLAYFIELD_W - 12, HUD_TOP + 40);
 
     // Status pill — multiball or mode timer (centered upper)
     if (multiballActive) {
@@ -396,7 +394,7 @@ export class Renderer {
     ctx.fillStyle = grad;
     ctx.fillRect(0, APRON_TOP, PLAYFIELD_W, PLAYFIELD_TOP - APRON_TOP);
 
-    // "SKILL SHOT" big decal across the apron.
+    // "SKILL SHOT" decal across the apron.
     ctx.save();
     ctx.fillStyle = 'rgba(245, 250, 255, 0.85)';
     ctx.shadowColor = '#000';
@@ -408,15 +406,14 @@ export class Renderer {
 
     // Skill-shot point values printed above the rollover lanes.
     const labels = ['10K', '25K', '10K'];
-    const xs = [120, _pf.playCenter, _pf.playRight - 120];
     ctx.save();
-    ctx.font = 'bold 13px "Helvetica Neue", Arial, sans-serif';
+    ctx.font = 'bold 12px "Helvetica Neue", Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.shadowColor = '#000';
     ctx.shadowBlur = 4;
     for (let i = 0; i < 3; i++) {
       ctx.fillStyle = COLOR.NEON_AMBER;
-      ctx.fillText(labels[i], xs[i], 184);
+      ctx.fillText(labels[i], _pf.rolloverXs[i], 194);
     }
     ctx.restore();
   }
@@ -533,28 +530,26 @@ export class Renderer {
     ctx.shadowColor = '#000';
     ctx.shadowBlur = 5;
 
-    // SPELL CHICAGO label centered directly ABOVE the drop-target row.
+    // SPELL CHICAGO label in the open centre lane between the two banks.
+    // (Spelling CHICAGO pays the SUPER JACKPOT; multiball comes from the
+    // Bean locks — the old decal claimed otherwise.)
     ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-    ctx.fillText('SPELL  CHICAGO', pf.playCenter, 450);
+    ctx.fillText('SPELL  CHICAGO', pf.playCenter, 496);
     ctx.font = 'bold 9px "Helvetica Neue", Arial, sans-serif';
     ctx.fillStyle = COLOR.INSERT_CYAN;
-    ctx.fillText('COMPLETE FOR MULTIBALL', pf.playCenter, 504);
+    ctx.fillText('FOR SUPER JACKPOT', pf.playCenter, 511);
 
-    // Scoop labels: short single-word labels that fit cleanly under the
-    // saucer without colliding with the ramp plates or running off the
-    // canvas edge. Previously "LAKE MICHIGAN" + "CITY TOUR" were too long
-    // and overlapped the ramps; truncated to "LAKE" / "MODE" with the
-    // theme spelled out in the toast on capture.
+    // Scoop labels — short so they don't collide with the ramp plates.
     ctx.font = 'bold 10px "Helvetica Neue", Arial, sans-serif';
     ctx.fillStyle = COLOR.RIVER_HI;
     ctx.fillText('LAKE', pf.lakeMichiganScoop.x, pf.lakeMichiganScoop.y + 26);
     ctx.fillStyle = COLOR.INSERT_AMBER;
     ctx.fillText('MODE', pf.cityTourScoop.x, pf.cityTourScoop.y + 26);
 
-    // CAPTIVE BALL label.
+    // CAPTIVE BALL label above its lane.
     ctx.fillStyle = COLOR.NEON_GREEN;
     ctx.font = 'bold 9px "Helvetica Neue", Arial, sans-serif';
-    ctx.fillText('CAPTIVE', pf.captive.x, pf.captive.y - 22);
+    ctx.fillText('CAPTIVE', pf.captive.x, pf.captive.y - 86);
 
     ctx.restore();
   }

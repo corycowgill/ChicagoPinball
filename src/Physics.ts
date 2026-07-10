@@ -55,12 +55,15 @@ export class Physics {
   }
 
   private dispatch(self: Matter.Body, other: Matter.Body, pair: Matter.Pair) {
+    // Balls riding a ramp/shooter transit are ghosts: no scoring, no drains.
+    if (inTransit(self) || inTransit(other)) return;
     const list = this.handlers.get(self.label);
     if (!list) return;
     for (const fn of list) fn(self, other, pair);
   }
 
   private dispatchActive(self: Matter.Body, other: Matter.Body, pair: Matter.Pair) {
+    if (inTransit(self) || inTransit(other)) return;
     const list = this.activeHandlers.get(self.label);
     if (!list) return;
     for (const fn of list) fn(self, other, pair);
@@ -112,4 +115,14 @@ export class Physics {
   afterUpdate(handler: () => void) {
     Matter.Events.on(this.engine, 'afterUpdate', handler);
   }
+}
+
+/** True while a ball is being carried along a ramp / shooter-lane path by
+ *  the transit system (see Playfield.startTransit). */
+export function inTransit(body: Matter.Body): boolean {
+  return (body as unknown as { $transit?: boolean }).$transit === true;
+}
+
+export function setTransit(body: Matter.Body, value: boolean) {
+  (body as unknown as { $transit?: boolean }).$transit = value;
 }
