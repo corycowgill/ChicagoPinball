@@ -349,7 +349,8 @@ export class Playfield {
     physics.onActive('pop-bumper', (self, o) => {
       if (o.label !== 'ball') return;
       // Only re-kick slow balls (don't double-fire a clean bounce).
-      if (Math.hypot(o.velocity.x, o.velocity.y) > 4) return;
+      const v = Matter.Body.getVelocity(o);
+      if (Math.hypot(v.x, v.y) > 4) return;
       this.popBumpers.find((p) => p.body === self)?.pop(o);
     });
 
@@ -360,7 +361,8 @@ export class Playfield {
     });
     physics.onActive('slingshot', (self, o) => {
       if (o.label !== 'ball') return;
-      if (Math.hypot(o.velocity.x, o.velocity.y) > 4) return;
+      const v = Matter.Body.getVelocity(o);
+      if (Math.hypot(v.x, v.y) > 4) return;
       this.slingshots.find((sl) => sl.body === self)?.pop(o);
     });
 
@@ -413,7 +415,9 @@ export class Playfield {
       if (o.label !== 'ball') return;
       // Require a real impact and rate-limit so a resting contact can't
       // farm points.
-      const rel = Math.hypot(o.velocity.x - this.captive.ball.velocity.x, o.velocity.y - this.captive.ball.velocity.y);
+      const vo = Matter.Body.getVelocity(o);
+      const vc = Matter.Body.getVelocity(this.captive.ball);
+      const rel = Math.hypot(vo.x - vc.x, vo.y - vc.y);
       if (rel < 2) return;
       if (this.clockMs - this.lastCaptiveScoreAt < 350) return;
       this.lastCaptiveScoreAt = this.clockMs;
@@ -444,8 +448,9 @@ export class Playfield {
     // how hard the plunger was pulled (arrival speed at the lane top).
     physics.on('launch-exit', (_s, o) => {
       if (o.label !== 'ball') return;
-      if (o.velocity.y >= 0) return; // only upward-moving balls
-      const arrivalSpeed = -o.velocity.y;
+      const v = Matter.Body.getVelocity(o);
+      if (v.y >= 0) return; // only upward-moving balls
+      const arrivalSpeed = -v.y;
       const laneIdx = arrivalSpeed > 8 ? 0 : arrivalSpeed > 4.5 ? 1 : 2;
       const path = this.shooterPath(this.rolloverXs[laneIdx]);
       this.physics.defer(() => this.startTransit(o, path, 10, { x: 0, y: 3.5 }));
