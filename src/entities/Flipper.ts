@@ -58,7 +58,18 @@ export class Flipper {
     this.pivot = Matter.Constraint.create({
       pointA: { x: pivotX, y: pivotY },
       bodyB: this.body,
-      pointB: { x: -half, y: 0 },
+      // Constraint.create snapshots angleB = the body's CURRENT angle, so
+      // pointB must be the pivot offset in the already-rotated frame — the
+      // raw local (-half, 0) pins a point up to ~105 px from the real pivot
+      // (worst on the right bat, whose rest angle is π−0.42). The rigid
+      // constraint then dragged the bat's collision vertices toward that
+      // bogus anchor every step BEFORE collision detection, while enforce()
+      // re-anchored the pose afterwards: the bat drew in one place and
+      // collided in another (balls sailed through where it was drawn).
+      pointB: {
+        x: -half * Math.cos(this.restAngle),
+        y: -half * Math.sin(this.restAngle),
+      },
       stiffness: 1,
       length: 0,
       damping: 0.1,
