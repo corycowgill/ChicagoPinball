@@ -59,7 +59,7 @@ export class Ramp {
 
   /** True if the ball is moving up fast enough to make the ramp. */
   canMake(ball: Matter.Body): boolean {
-    return ball.velocity.y <= -this.minSpeed;
+    return Matter.Body.getVelocity(ball).y <= -this.minSpeed;
   }
 
   flashNow() {

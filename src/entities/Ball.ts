@@ -1,5 +1,5 @@
 import Matter from 'matter-js';
-import { BALL_RADIUS, BALL_MAX_SPEED, COLOR } from '../constants';
+import { BALL_RADIUS, BALL_MAX_SPEED, PHYSICS_SUBSTEPS, COLOR } from '../constants';
 
 export class Ball {
   readonly body: Matter.Body;
@@ -26,7 +26,7 @@ export class Ball {
   }
 
   capVelocity() {
-    const v = this.body.velocity;
+    const v = Matter.Body.getVelocity(this.body);
     const mag = Math.hypot(v.x, v.y);
     if (mag > BALL_MAX_SPEED) {
       const s = BALL_MAX_SPEED / mag;
@@ -42,14 +42,14 @@ export class Ball {
    *  applyForce because Matter forces are scaled by 1/mass and would need
    *  to be huge to noticeably move the ball. */
   unstickIfStalled() {
-    const v = this.body.velocity;
+    const v = Matter.Body.getVelocity(this.body);
     const mag = Math.hypot(v.x, v.y);
     // Threshold raised so brief contact pauses don't trigger; trigger
     // window shortened so the ball doesn't sit visibly idle for a full
-    // second when it does get cradled.
+    // second when it does get cradled. Counter ticks once per SUBSTEP.
     if (mag < 0.6) {
       this.stuckFrames++;
-      if (this.stuckFrames > 30) {
+      if (this.stuckFrames > 30 * PHYSICS_SUBSTEPS) {
         // Direction bias: nudge AWAY from the closer side of centre so
         // the ball moves into open play.
         const sign = this.body.position.x < 240 ? +1 : -1;

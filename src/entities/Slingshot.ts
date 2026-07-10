@@ -58,10 +58,12 @@ export class Slingshot {
   }
 
   pop(ball: Matter.Body) {
-    const force = 0.05 * ball.mass;
-    Matter.Body.applyForce(ball, ball.position, {
-      x: this.normal.x * force,
-      y: this.normal.y * force,
+    // Direct velocity impulse (applyForce loses strength under substepping).
+    const kick = 11;
+    const v = Matter.Body.getVelocity(ball);
+    Matter.Body.setVelocity(ball, {
+      x: v.x + this.normal.x * kick,
+      y: v.y + this.normal.y * kick,
     });
     this.flash = 1;
   }

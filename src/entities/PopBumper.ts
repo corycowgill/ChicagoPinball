@@ -26,10 +26,13 @@ export class PopBumper {
     const dx = ball.position.x - this.body.position.x;
     const dy = ball.position.y - this.body.position.y;
     const len = Math.hypot(dx, dy) || 1;
-    const force = 0.045 * ball.mass;
-    Matter.Body.applyForce(ball, ball.position, {
-      x: (dx / len) * force,
-      y: (dy / len) * force,
+    // Direct velocity impulse (applyForce integrates over dt² and loses
+    // ~9× strength under physics substepping).
+    const kick = 12;
+    const v = Matter.Body.getVelocity(ball);
+    Matter.Body.setVelocity(ball, {
+      x: v.x + (dx / len) * kick,
+      y: v.y + (dy / len) * kick,
     });
     this.flash = 1;
   }

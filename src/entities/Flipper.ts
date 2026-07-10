@@ -6,6 +6,7 @@ import {
   FLIPPER_ACTIVE_ANGLE,
   FLIPPER_KICK_VEL,
   FLIPPER_RETURN_VEL,
+  PHYSICS_SUBSTEPS,
   COLOR,
 } from '../constants';
 
@@ -88,12 +89,15 @@ export class Flipper {
     const target = this.active ? this.activeAngle : this.restAngle;
     const speed = this.active ? this.kickStep : this.returnStep;
     const diff = target - this.body.angle;
-    if (Math.abs(diff) < speed * 0.5) {
-      // Within one step of target — hold still.
+    if (Math.abs(diff) < 1e-3) {
+      // At target — hold still.
       Matter.Body.setAngularVelocity(this.body, 0);
       Matter.Body.setVelocity(this.body, { x: 0, y: 0 });
     } else {
-      const w = Math.sign(diff) * speed;
+      // Angular velocity is per 16.6 ms; each substep rotates w/SUBSTEPS, so
+      // command exactly what's needed near the target to land on it instead
+      // of overshooting (enforce clamps any residue).
+      const w = Math.sign(diff) * Math.min(speed, Math.abs(diff) * PHYSICS_SUBSTEPS);
       Matter.Body.setAngularVelocity(this.body, w);
       // The bat rotates about the PIVOT, not its own centre of mass — so the
       // centre must also translate (v = ω × r). Without this, Matter resolves
@@ -116,13 +120,11 @@ export class Flipper {
     const target = this.active ? this.activeAngle : this.restAngle;
     const diff = target - this.body.angle;
     const half = FLIPPER_LEN / 2;
-    // Snap-to-target window: 0.15 rad (~8.6°) is enough to absorb the
-    // per-step drift introduced by the pivot constraint's position-
-    // correction impulses (observed up to ~7° on the right flipper at
-    // rest), but the corresponding tip motion (0.15 × 108 = 16.2 px)
-    // is well under the bat thickness 28 + ball diameter 22 = 50,
-    // so the snap can't tunnel through a ball even mid-swing.
-    if (Math.abs(diff) < 0.15) {
+    // Snap-to-target window: only absorbs the tiny residue left by ball
+    // impacts nudging the held bat. Kept SMALL (tip motion 0.03 × 108 ≈
+    // 3 px) because the snap is a teleport that bypasses collision — a
+    // wide window was one of the ways balls slipped through the bat.
+    if (Math.abs(diff) < 0.03) {
       Matter.Body.setAngle(this.body, target);
       Matter.Body.setPosition(this.body, {
         x: this.pivotX + Math.cos(target) * half,

@@ -12,6 +12,15 @@ export const BALL_MAX_SPEED = 22;
 
 export const GRAVITY_Y = 0.95;
 
+// Physics substeps per 60 Hz frame. Matter has no continuous collision
+// detection: at full speed a falling ball and a sweeping flipper bat close
+// at ~44 px per 16.6 ms step — more than the bat is thick — so the ball
+// could skip clean over the bat between steps. Substepping cuts per-step
+// motion to a third. NOTE: velocities read straight off bodies are in
+// px-per-substep units under substepping; always read via
+// Matter.Body.getVelocity (normalized to px per 16.6 ms) instead.
+export const PHYSICS_SUBSTEPS = 3;
+
 export const FLIPPER_LEN = 108;
 // Bat thickness must always exceed BALL_MAX_SPEED — see above.
 export const FLIPPER_HEIGHT = 28;

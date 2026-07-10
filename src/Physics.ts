@@ -1,5 +1,5 @@
 import Matter from 'matter-js';
-import { GRAVITY_Y } from './constants';
+import { GRAVITY_Y, PHYSICS_SUBSTEPS } from './constants';
 
 export type CollisionHandler = (
   self: Matter.Body,
@@ -105,7 +105,13 @@ export class Physics {
   }
 
   step(dtMs: number) {
-    Matter.Engine.update(this.engine, dtMs);
+    // Substep for anti-tunnelling — see PHYSICS_SUBSTEPS. beforeUpdate /
+    // afterUpdate handlers (flipper drive + enforce, deferred mutations)
+    // run once per substep, which is exactly what we want.
+    const sub = dtMs / PHYSICS_SUBSTEPS;
+    for (let i = 0; i < PHYSICS_SUBSTEPS; i++) {
+      Matter.Engine.update(this.engine, sub);
+    }
   }
 
   beforeUpdate(handler: () => void) {

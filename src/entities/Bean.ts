@@ -49,10 +49,12 @@ export class Bean {
     const dx = ball.position.x - this.cx;
     const dy = ball.position.y - this.cy;
     const len = Math.hypot(dx, dy) || 1;
-    const force = 0.05 * ball.mass;
-    Matter.Body.applyForce(ball, ball.position, {
-      x: (dx / len) * force,
-      y: (dy / len) * force,
+    // Direct velocity impulse (applyForce loses strength under substepping).
+    const kick = 12;
+    const v = Matter.Body.getVelocity(ball);
+    Matter.Body.setVelocity(ball, {
+      x: v.x + (dx / len) * kick,
+      y: v.y + (dy / len) * kick,
     });
     this.flash = 1;
   }
