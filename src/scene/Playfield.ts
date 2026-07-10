@@ -1,5 +1,5 @@
 import Matter from 'matter-js';
-import { Physics } from '../Physics';
+import { Physics, setTransit } from '../Physics';
 import { Ball } from '../entities/Ball';
 import { Flipper } from '../entities/Flipper';
 import { Plunger } from '../entities/Plunger';
@@ -21,6 +21,8 @@ import {
   POINTS,
   COLOR,
   SCOOP_HOLD_MS,
+  PLUNGER_MIN_LAUNCH,
+  PLUNGER_LAUNCH_RANGE,
 } from '../constants';
 import { ScoreEvent } from '../types';
 
@@ -31,16 +33,36 @@ export interface PlayfieldEvents {
   onScoopMode: () => void;
 }
 
+interface Pt {
+  x: number;
+  y: number;
+}
+
 interface WallDef {
   body: Matter.Body;
-  outline: { x: number; y: number }[];
+  outline: Pt[];
   kind?: 'rail' | 'wood' | 'plastic';
+}
+
+/** A ball being carried along a fixed path (ramp habitrail / shooter lane).
+ *  While in transit the ball is a non-colliding ghost that follows the
+ *  drawn rail exactly, so the visuals and the physics agree. */
+interface Transit {
+  ball: Matter.Body;
+  path: Pt[];
+  /** Cumulative arc length at each path point. */
+  cum: number[];
+  total: number;
+  dist: number;
+  /** px per 60 Hz step. */
+  speed: number;
+  exitVel: Pt;
 }
 
 /** Vertical zoning of the playfield (the canvas itself is 540×960). */
 export const BACKBOX_BOTTOM = 60;
 export const HUD_BOTTOM = 130;
-export const PLAYFIELD_TOP = 200;       // start of actual playable surface
+export const PLAYFIELD_TOP = 200; // start of the playable surface proper
 
 export class Playfield {
   balls: Ball[] = [];
@@ -64,230 +86,203 @@ export class Playfield {
   postPositions: { x: number; y: number; r?: number }[] = [];
   drainSensor: Matter.Body;
 
-  /** Decorative chrome wireforms drawn on top of the playfield (NOT physics
-   *  colliders — the ball travels these via teleport from ramp.tryMake). */
-  habitrails: { points: { x: number; y: number }[]; tone: 'chrome' }[] = [];
+  /** Shooter lane geometry — vertical strip on the right side. */
+  readonly laneInnerX = PLAYFIELD_W - 60; // 480
+  readonly laneOuterX = PLAYFIELD_W - 8; // 532
+  readonly launchX = (this.laneInnerX + this.laneOuterX) / 2; // 506
 
-  /** Plunger lane geometry — vertical strip on the right side of the
-   *  playfield, with a curved deflector at the top arcing the launched
-   *  ball into the playfield. */
-  readonly laneInnerX = PLAYFIELD_W - 60;
-  readonly laneOuterX = PLAYFIELD_W - 8;
-  readonly launchX = (PLAYFIELD_W - 60 + PLAYFIELD_W - 8) / 2;
-  readonly launchRestY = PLAYFIELD_H - 70;
+  /** Effective play-area (excludes the shooter lane). */
+  readonly playRight = this.laneInnerX;
+  readonly playCenter = this.playRight / 2; // 240
 
-  /** Effective play-area horizontal centre (excludes the launch lane). */
-  readonly playRight = PLAYFIELD_W - 60;
-  readonly playCenter = (PLAYFIELD_W - 60) / 2;
+  /** Flipper geometry. Tip-to-tip gap ≈ 39 px — wider than the ball (22),
+   *  so the centre drain is real, like an actual machine. */
+  readonly flipperY = PLAYFIELD_H - 200; // 760
+  readonly flipperGap = 118;
 
-  /** Flipper geometry — promoted to class level so buildWalls can place
-   *  the inlane / outlane diagonals to meet the flipper base cleanly. */
-  readonly flipperY = PLAYFIELD_H - 200;
-  readonly flipperGap = 105;
+  /** Skill-shot rollover lanes (x centres, top of the playfield). */
+  readonly rolloverXs = [190, 240, 290];
+  readonly rolloverY = 226;
+
+  private transits: Transit[] = [];
+  /** ms until an auto-plunge fires for a freshly served ball. */
+  private autoLaunchMs = 0;
+  private clockMs = 0;
+  private lastCaptiveScoreAt = -1000;
+
+  launchRestY: number;
 
   constructor(private physics: Physics, private events: PlayfieldEvents) {
     this.buildWalls();
 
-    // Initial ball — sits on the plunger.
+    // ── PLUNGER + initial ball resting on its head ──
+    const plungerW = this.laneOuterX - this.laneInnerX - 4;
+    this.plunger = new Plunger(this.launchX, PLAYFIELD_H - 60, plungerW);
+    physics.add(this.plunger.body);
+    // Rest the ball exactly on the plunger head (no initial overlap jitter).
+    this.launchRestY = PLAYFIELD_H - 60 - this.plunger.height / 2 - BALL_RADIUS;
+
     const initialBall = new Ball(this.launchX, this.launchRestY);
     this.balls.push(initialBall);
     physics.add(initialBall.body);
 
-    // ── FLIPPERS — bigger bats, RAISED higher up the playfield, tighter
-    //    drain. Pivots are 105 px from the play centre, giving a tip-to-tip
-    //    gap of about 11 px (tight enough to make a missed shot recoverable
-    //    on a cradle). ──
-    const flipperY = this.flipperY;
-    const flipperGap = this.flipperGap;
-    this.leftFlipper = new Flipper('left', this.playCenter - flipperGap, flipperY);
-    this.rightFlipper = new Flipper('right', this.playCenter + flipperGap, flipperY);
+    // ── FLIPPERS ──
+    this.leftFlipper = new Flipper('left', this.playCenter - this.flipperGap, this.flipperY);
+    this.rightFlipper = new Flipper('right', this.playCenter + this.flipperGap, this.flipperY);
     physics.add(this.leftFlipper.body, this.leftFlipper.pivot);
     physics.add(this.rightFlipper.body, this.rightFlipper.pivot);
 
-    // ── SLINGSHOTS — moved INWARD so there's room for a real outlane on
-    //    the outside and a real inlane channel between the slingshot and
-    //    the outlane wall. The hypotenuse (live edge) faces the inlane on
-    //    the inside; the slingshot's vertical outer edge is the inlane's
-    //    inner wall.
-    const slingY = flipperY - 64;
-    const slingOuterL = 70;
-    const slingOuterR = 2 * this.playCenter - slingOuterL;
-    const slingInnerL = this.playCenter - (flipperGap - 22); // = 152
-    const slingInnerR = 2 * this.playCenter - slingInnerL;
+    // ── SLINGSHOTS — compact triangles above the flippers. The vertical
+    //    outer edge doubles as the inlane's inner wall. ──
+    const slingTopY = 650;
+    const slingBotY = 720;
+    const slingOuterL = 84;
+    const slingInnerL = 148;
+    const slingOuterR = this.playRight - slingOuterL;
+    const slingInnerR = this.playRight - slingInnerL;
     this.slingshots.push(
       new Slingshot(
         [
-          { x: slingOuterL, y: slingY - 60 },     // top-outer
-          { x: slingOuterL, y: slingY + 26 },     // bottom-outer (against inlane)
-          { x: slingInnerL, y: slingY + 28 },     // bottom-inner (next to flipper pivot)
+          { x: slingOuterL, y: slingTopY },
+          { x: slingOuterL, y: slingBotY },
+          { x: slingInnerL, y: slingBotY + 4 },
         ],
-        norm({ x: 0.85, y: -0.55 }),               // live edge faces upper-right
+        norm({ x: 0.72, y: -0.69 }),
       ),
-    );
-    this.slingshots.push(
       new Slingshot(
         [
-          { x: slingOuterR, y: slingY - 60 },
-          { x: slingOuterR, y: slingY + 26 },
-          { x: slingInnerR, y: slingY + 28 },
+          { x: slingOuterR, y: slingTopY },
+          { x: slingOuterR, y: slingBotY },
+          { x: slingInnerR, y: slingBotY + 4 },
         ],
-        norm({ x: -0.85, y: -0.55 }),
+        norm({ x: -0.72, y: -0.69 }),
       ),
     );
     for (const s of this.slingshots) physics.add(s.body);
 
-    // ── SKILL-SHOT ROLLOVERS at the top — 3 lanes labeled with point values. ──
-    const rolloverY = 220;
-    const rolloverXs = [120, this.playCenter, this.playRight - 120];
+    // ── SKILL-SHOT ROLLOVERS — three real lanes with guide walls (built in
+    //    buildWalls). Values: 10K / 25K / 10K; lane picked by plunger power. ──
     const rolloverLetters = ['10K', '25K', '10K'];
     for (let i = 0; i < 3; i++) {
-      const r = new Rollover(rolloverXs[i], rolloverY, rolloverLetters[i], i);
+      const r = new Rollover(this.rolloverXs[i], this.rolloverY, rolloverLetters[i], i);
       this.rollovers.push(r);
       physics.add(r.sensor);
     }
 
-    // ── THE BEAN — smaller chrome dome at upper-centre (the user's
-    //    feedback: shrink so it stops blocking flow). ──
-    this.bean = new Bean(this.playCenter, 280, 26);
-    physics.add(this.bean.body, this.bean.lockSensor);
+    // ── THE BEAN — chrome dome below the rollover lanes; multiball lock. ──
+    this.bean = new Bean(this.playCenter, 300, 24);
+    physics.add(this.bean.body);
 
-    // ── POP BUMPERS — triangle BELOW the Bean. Previously positioned so
-    //    the upper bumpers overlapped the Bean's collision body (Bean at
-    //    y=280-306, bumpers at y=298-342); a ball squeezed between them
-    //    could get cradled. Now placed clear of the Bean (y=340) and the
-    //    lock saucer below it (y=313).
-    this.popBumpers.push(new PopBumper(this.playCenter - 80, 360, 22, COLOR.INSERT_AMBER));
-    this.popBumpers.push(new PopBumper(this.playCenter + 80, 360, 22, COLOR.INSERT_RED));
-    this.popBumpers.push(new PopBumper(this.playCenter, 410, 22, COLOR.INSERT_BLUE));
+    // ── POP BUMPERS — triangle below the Bean. ──
+    this.popBumpers.push(new PopBumper(this.playCenter - 55, 355, 19, COLOR.INSERT_AMBER));
+    this.popBumpers.push(new PopBumper(this.playCenter + 55, 355, 19, COLOR.INSERT_RED));
+    this.popBumpers.push(new PopBumper(this.playCenter, 408, 19, COLOR.INSERT_BLUE));
     for (const p of this.popBumpers) physics.add(p.body);
 
-    // ── SPORTS TEAM STANDUPS — 2-banks INSIDE the ramp curves (between the
-    //    raised ramps and the pop-bumper cluster), so the ramp visuals don't
-    //    cover them. Each pair of targets is the team's "bank" — complete
-    //    both for the team bonus.
-    this.standups.push(new StandupTarget({
-      x: 145, y: 310, angle: 0.55, color: COLOR.INSERT_YELLOW, id: 'cubs',
-      width: 38, height: 12,
-    }));
-    this.standups.push(new StandupTarget({
-      x: 135, y: 390, angle: 0.6, color: COLOR.INSERT_AMBER, id: 'bears',
-      width: 38, height: 12,
-    }));
-    this.standups.push(new StandupTarget({
-      x: this.playRight - 145, y: 310, angle: -0.55, color: COLOR.INSERT_RED, id: 'bulls',
-      width: 38, height: 12,
-    }));
-    this.standups.push(new StandupTarget({
-      x: this.playRight - 135, y: 390, angle: -0.6, color: COLOR.INSERT_PURPLE, id: 'sox',
-      width: 38, height: 12,
-    }));
+    // ── SPORTS TEAM STANDUPS — flanking the bumper cluster, angled inward. ──
+    this.standups.push(
+      new StandupTarget({ x: 126, y: 316, angle: 0.5, color: COLOR.INSERT_YELLOW, id: 'cubs', width: 34, height: 11 }),
+      new StandupTarget({ x: 114, y: 388, angle: 0.72, color: COLOR.INSERT_AMBER, id: 'bears', width: 34, height: 11 }),
+      new StandupTarget({ x: this.playRight - 126, y: 316, angle: -0.5, color: COLOR.INSERT_RED, id: 'bulls', width: 34, height: 11 }),
+      new StandupTarget({ x: this.playRight - 114, y: 388, angle: -0.72, color: COLOR.INSERT_PURPLE, id: 'sox', width: 34, height: 11 }),
+    );
     for (const s of this.standups) physics.add(s.body);
 
-    // ── CHICAGO DROP-TARGET BANK — single horizontal row across mid-playfield. ──
-    // (The HUD CHICAGO strip mirrors progress; this bank is the only physical
-    // hit target — no duplication.)
-    this.bank = new ChicagoBank(physics, {
-      x: this.playCenter,
-      yTop: 470,
-      spacing: 0,                       // not used in horizontal mode
-      horizontal: true,
-      letterSpacing: 38,
-    });
+    // ── CHICAGO DROP TARGETS — two angled banks flanking the centre lane:
+    //    "CHI" up the left diagonal, "CAGO" down the right diagonal. The
+    //    centre of the playfield stays open (the old single horizontal row
+    //    was an impassable wall — 10 px gaps vs a 22 px ball). ──
+    this.bank = new ChicagoBank(physics, [
+      // C-H-I: left bank, bottom → top, facing the right flipper.
+      { x: 152, y: 468, angle: -0.8 },
+      { x: 178, y: 441, angle: -0.8 },
+      { x: 204, y: 414, angle: -0.8 },
+      // C-A-G-O: right bank, top → bottom, facing the left flipper.
+      { x: 276, y: 414, angle: 0.8 },
+      { x: 302, y: 441, angle: 0.8 },
+      { x: 328, y: 468, angle: 0.8 },
+      { x: 354, y: 495, angle: 0.8 },
+    ]);
 
-    // ── LEFT RAMP — Willis Tower (orange). Entry near the right flipper, the
-    //    plate curves up the LEFT side of the playfield, exits at the
-    //    upper-left, and a chrome habitrail returns the ball to the RIGHT
-    //    inlane area.
+    // ── LEFT RAMP — Willis Tower (orange). Mouth mid-left (a right-flipper
+    //    shot), plate climbs the left side, habitrail crosses the top and
+    //    drops the ball into the RIGHT inlane. ──
     this.leftRamp = new Ramp({
-      entry: { x: 200, y: 600 },
-      exit: { x: this.playCenter + 80, y: 250 },
       plate: [
-        { x: 200, y: 600 },
-        { x: 130, y: 530 },
-        { x: 80,  y: 430 },
-        { x: 70,  y: 320 },
-        { x: 110, y: 240 },
-        { x: 200, y: 220 },
-        { x: this.playCenter, y: 220 },
-        { x: this.playCenter + 80, y: 250 },
+        { x: 150, y: 560 },
+        { x: 110, y: 495 },
+        { x: 88, y: 410 },
+        { x: 84, y: 320 },
+        { x: 106, y: 255 },
+        { x: 150, y: 222 },
+        { x: 195, y: 208 },
       ],
       habitrail: [
-        { x: this.playCenter + 80, y: 250 },
-        { x: this.playRight - 40, y: 320 },
-        { x: this.playRight - 40, y: 600 },
-        { x: this.playRight - 70, y: flipperY - 80 },
+        { x: 195, y: 208 },
+        { x: 258, y: 192 },
+        { x: 336, y: 200 },
+        { x: 404, y: 232 },
+        { x: 459, y: 300 },
+        { x: 459, y: 580 },
+        { x: 434, y: 618 },
+        { x: 417, y: 640 },
       ],
-      returnVel: { x: -2, y: 8 },
+      exitVel: { x: 0.4, y: 6 },
       color: COLOR.INSERT_AMBER,
-      arrowAt: { x: 200, y: 640 },
       arrowAngle: -Math.PI / 2 - 0.45,
       label: 'left-ramp',
       themeText: 'WILLIS',
-      minSpeed: 6,
     });
-    physics.add(this.leftRamp.entry, this.leftRamp.exit);
+    physics.add(this.leftRamp.entry);
 
-    // ── RIGHT RAMP — CTA Loop (cyan). Entry near the left flipper, plate
-    //    curves up the RIGHT side, exits at upper-right, habitrail returns
-    //    to LEFT inlane.
+    // ── RIGHT RAMP — CTA Loop (cyan). Mirror image, returns to LEFT inlane
+    //    (straight over the spinner). ──
     this.rightRamp = new Ramp({
-      entry: { x: this.playCenter + 60, y: 600 },
-      exit: { x: this.playCenter - 80, y: 250 },
       plate: [
-        { x: this.playCenter + 60, y: 600 },
-        { x: this.playCenter + 130, y: 530 },
-        { x: this.playRight - 80, y: 440 },
-        { x: this.playRight - 60, y: 330 },
-        { x: this.playRight - 100, y: 240 },
-        { x: this.playCenter + 90, y: 220 },
-        { x: this.playCenter, y: 220 },
-        { x: this.playCenter - 80, y: 250 },
+        { x: 330, y: 560 },
+        { x: 370, y: 495 },
+        { x: 392, y: 410 },
+        { x: 396, y: 320 },
+        { x: 374, y: 255 },
+        { x: 330, y: 222 },
+        { x: 285, y: 208 },
       ],
       habitrail: [
-        { x: this.playCenter - 80, y: 250 },
-        { x: 40, y: 320 },
-        { x: 40, y: 600 },
-        { x: 70, y: flipperY - 80 },
+        { x: 285, y: 208 },
+        { x: 222, y: 192 },
+        { x: 144, y: 200 },
+        { x: 76, y: 232 },
+        { x: 21, y: 300 },
+        { x: 21, y: 580 },
+        { x: 46, y: 618 },
+        { x: 63, y: 640 },
       ],
-      returnVel: { x: 2, y: 8 },
+      exitVel: { x: -0.4, y: 6 },
       color: COLOR.INSERT_CYAN,
-      arrowAt: { x: this.playCenter + 60, y: 640 },
       arrowAngle: -Math.PI / 2 + 0.45,
       label: 'right-ramp',
       themeText: 'CTA',
-      minSpeed: 6,
     });
-    physics.add(this.rightRamp.entry, this.rightRamp.exit);
+    physics.add(this.rightRamp.entry);
 
-    // ── LAKE MICHIGAN SCOOP — saucer on the LEFT (water-themed). ──
-    this.lakeMichiganScoop = new Scoop(80, 540, -Math.PI / 2 + 0.3, 16);
-    // Override label so the collision routes here separately from CITY TOUR.
+    // ── LAKE MICHIGAN SCOOP — saucer up the left side. ──
+    this.lakeMichiganScoop = new Scoop(80, 540, -Math.PI / 2 + 0.35, 15);
     (this.lakeMichiganScoop.sensor as Matter.Body).label = 'lake-scoop';
     physics.add(this.lakeMichiganScoop.sensor);
 
-    // ── CITY TOUR SCOOP — mode-start saucer on the RIGHT. ──
-    this.cityTourScoop = new Scoop(this.playRight - 80, 540, -Math.PI / 2 - 0.3, 18);
+    // ── CITY TOUR SCOOP — mode-start saucer up the right side. ──
+    this.cityTourScoop = new Scoop(this.playRight - 80, 545, -Math.PI / 2 - 0.35, 15);
     physics.add(this.cityTourScoop.sensor);
 
-    // ── CAPTIVE BALL lane — placed in the upper-right zone, between the
-    //    bumper triangle and the right ramp. A left-flipper shot aimed
-    //    sharply up-right reaches it cleanly (the classic Stern captive
-    //    line). Previously at playRight-80 = 400 it was sitting at the
-    //    far edge where reaching it required more horizontal speed than
-    //    a flipper kick provides; pulled inward to 360 so a moderate
-    //    angle off the left flipper can make the shot.
-    this.captive = new CaptiveBall(360, 430, 50);
-    physics.add(this.captive.ball, ...this.captive.walls);
+    // ── CAPTIVE BALL — vertical lane on the far right; a left-flipper shot
+    //    straight up the right edge strikes it through the stop posts. ──
+    this.captive = new CaptiveBall(430, 494);
+    physics.add(this.captive.ball, this.captive.tether, ...this.captive.walls);
 
-    // ── SPINNER — far-left inlane, classic spinner blade. ──
-    this.spinner = new Spinner(50, 660, 32);
+    // ── SPINNER — sits across the LEFT INLANE, so every right-ramp return
+    //    (and any inlane pass) spins it. ──
+    this.spinner = new Spinner(63, 678, 34);
     physics.add(this.spinner.body, this.spinner.pivot, this.spinner.stop);
-
-    // ── PLUNGER ──
-    const plungerCx = (this.laneInnerX + this.laneOuterX) / 2;
-    const plungerW = this.laneOuterX - this.laneInnerX - 4;
-    this.plunger = new Plunger(plungerCx, PLAYFIELD_H - 60, plungerW);
-    physics.add(this.plunger.body);
 
     // ── DRAIN sensor (across the play area only). ──
     this.drainSensor = Matter.Bodies.rectangle(
@@ -304,6 +299,7 @@ export class Playfield {
       this.leftFlipper.tick();
       this.rightFlipper.tick();
       for (const b of this.balls) {
+        if ((b.body as unknown as { $transit?: boolean }).$transit) continue;
         b.capVelocity();
         b.unstickIfStalled();
       }
@@ -317,63 +313,57 @@ export class Playfield {
       this.rightFlipper.enforce();
     });
 
-    // ── Collision routing ──
+    this.wireCollisions();
+  }
+
+  // ── Collision routing ────────────────────────────────────────────────────
+
+  private wireCollisions() {
+    const physics = this.physics;
+
     physics.on('bean', (_s, o) => {
       if (o.label !== 'ball') return;
       this.bean.pop(o);
       this.events.onScore({ kind: 'bean', points: POINTS.BEAN });
-      // Bean as multiball-lock toy: every Nth bean hit also fires a LOCK.
-      // The dedicated `bean-lock` sensor below the dome is unreachable
-      // because the dome's collision body blocks it, so we drive locks off
-      // of bean-hit count instead.
+      // The Bean is the multiball lock: every Nth hit captures the ball.
       if (this.bean.registerHit()) {
         this.events.onScore({ kind: 'lock', points: POINTS.LOCK });
         const ball = this.balls.find((b) => b.body === o);
         if (ball) {
-          this.physics.defer(() => {
-            this.physics.remove(ball.body);
-            this.balls = this.balls.filter((b) => b !== ball);
-            this.events.onLockComplete();
-          });
+          this.removeBall(ball.body);
+          this.physics.defer(() => this.events.onLockComplete());
         }
       }
     });
-    // Active-contact handler: keep pushing the ball away if it tries to
-    // rest against the bean. No score award (score only on first contact).
+    // Keep pushing the ball away if it tries to rest against the bean.
     physics.onActive('bean', (_s, o) => {
       if (o.label !== 'ball') return;
       this.bean.pop(o);
     });
-    // (Legacy 'bean-lock' sensor handler removed — locks fire via
-    // registerHit() in the 'bean' handler above.)
+
     physics.on('pop-bumper', (self, o) => {
       if (o.label !== 'ball') return;
-      const b = this.popBumpers.find((p) => p.body === self);
-      if (b) b.pop(o);
+      this.popBumpers.find((p) => p.body === self)?.pop(o);
       this.events.onScore({ kind: 'pop-bumper', points: POINTS.POP_BUMPER });
     });
     physics.onActive('pop-bumper', (self, o) => {
       if (o.label !== 'ball') return;
-      // Only re-kick if the ball is going slowly (so we don't double-fire
-      // on a normal high-speed bounce).
-      const v = Math.hypot(o.velocity.x, o.velocity.y);
-      if (v > 4) return;
-      const b = this.popBumpers.find((p) => p.body === self);
-      if (b) b.pop(o);
+      // Only re-kick slow balls (don't double-fire a clean bounce).
+      if (Math.hypot(o.velocity.x, o.velocity.y) > 4) return;
+      this.popBumpers.find((p) => p.body === self)?.pop(o);
     });
+
     physics.on('slingshot', (self, o) => {
       if (o.label !== 'ball') return;
-      const s = this.slingshots.find((sl) => sl.body === self);
-      if (s) s.pop(o);
+      this.slingshots.find((sl) => sl.body === self)?.pop(o);
       this.events.onScore({ kind: 'slingshot', points: POINTS.SLINGSHOT });
     });
     physics.onActive('slingshot', (self, o) => {
       if (o.label !== 'ball') return;
-      const v = Math.hypot(o.velocity.x, o.velocity.y);
-      if (v > 4) return;
-      const s = this.slingshots.find((sl) => sl.body === self);
-      if (s) s.pop(o);
+      if (Math.hypot(o.velocity.x, o.velocity.y) > 4) return;
+      this.slingshots.find((sl) => sl.body === self)?.pop(o);
     });
+
     for (const t of this.bank.targets) {
       physics.on(t.body.label, (self, o) => {
         if (o.label !== 'ball') return;
@@ -387,43 +377,50 @@ export class Playfield {
         }
       });
     }
+
     for (const r of this.rollovers) {
       physics.on(r.label, (_s, o) => {
         if (o.label !== 'ball') return;
         if (!r.lit) {
           r.trigger();
-          // Skill-shot value matches the on-playfield label (10K / 25K / 10K).
-          const points = r.letter === '25K' ? 25000 : 10000;
+          const points = r.letter === '25K' ? POINTS.SKILL_SHOT_CENTER : POINTS.SKILL_SHOT_SIDE;
           this.events.onScore({ kind: 'skill-shot', points });
         }
       });
     }
+
     for (const s of this.standups) {
       physics.on(s.label, (_self, o) => {
         if (o.label !== 'ball') return;
         s.hit();
-        this.events.onScore({ kind: 'pop-bumper', points: 300 });
+        this.events.onScore({ kind: 'standup', points: POINTS.STANDUP });
       });
     }
 
-    // RAMP make logic — entering the entry sensor with sufficient upward
-    // velocity teleports the ball to the exit & gives it the return velocity.
-    physics.on('left-ramp-entry', (_s, o) => {
+    // Ramp mouths: a ball entering with enough upward speed rides the
+    // drawn plate + habitrail all the way to the opposite inlane.
+    const rampEntry = (ramp: Ramp) => (_s: Matter.Body, o: Matter.Body) => {
       if (o.label !== 'ball') return;
-      if (this.leftRamp.tryMake(o))
-        this.events.onScore({ kind: 'center-ramp', points: POINTS.CENTER_RAMP });
-    });
-    physics.on('right-ramp-entry', (_s, o) => {
-      if (o.label !== 'ball') return;
-      if (this.rightRamp.tryMake(o))
-        this.events.onScore({ kind: 'center-ramp', points: POINTS.CENTER_RAMP });
-    });
+      if (!ramp.canMake(o)) return;
+      ramp.flashNow();
+      this.events.onScore({ kind: 'ramp', points: POINTS.RAMP });
+      this.physics.defer(() => this.startTransit(o, ramp.fullPath, 12, ramp.exitVel));
+    };
+    physics.on('left-ramp-entry', rampEntry(this.leftRamp));
+    physics.on('right-ramp-entry', rampEntry(this.rightRamp));
 
     physics.on('captive-ball', (_s, o) => {
       if (o.label !== 'ball') return;
+      // Require a real impact and rate-limit so a resting contact can't
+      // farm points.
+      const rel = Math.hypot(o.velocity.x - this.captive.ball.velocity.x, o.velocity.y - this.captive.ball.velocity.y);
+      if (rel < 2) return;
+      if (this.clockMs - this.lastCaptiveScoreAt < 350) return;
+      this.lastCaptiveScoreAt = this.clockMs;
       this.captive.pulseFlash();
       this.events.onScore({ kind: 'captive', points: POINTS.CAPTIVE_BALL });
     });
+
     physics.on('scoop', (_s, o) => {
       if (o.label !== 'ball') return;
       if (this.cityTourScoop.capture(o)) {
@@ -437,36 +434,99 @@ export class Playfield {
         this.events.onScore({ kind: 'lake-bonus', points: 1500 });
       }
     });
+
     physics.on('drain', (_s, o) => {
       if (o.label === 'ball') this.events.onDrain(o);
     });
 
-    // Launch-exit teleport: ball going UP through the launch-exit sensor is
-    // teleported to the upper playfield, just below the rollover lanes,
-    // with a tiny downward velocity so it naturally falls into the bumper
-    // cluster. This is the "shooter habitrail dump point" — visually
-    // matched by the chrome rail above.
+    // Shooter-lane exit: the launched ball rides the visible wireform over
+    // the back of the playfield and drops into a skill-shot lane chosen by
+    // how hard the plunger was pulled (arrival speed at the lane top).
     physics.on('launch-exit', (_s, o) => {
       if (o.label !== 'ball') return;
       if (o.velocity.y >= 0) return; // only upward-moving balls
-      this.physics.defer(() => {
-        // Drop the ball just ABOVE the LEFT skill-shot rollover lane
-        // (x=120) with a tiny rightward bias so it falls through the
-        // rollover sensor (10K skill shot) and then drifts toward the
-        // bumper triangle in the upper playfield. The horizontal bias
-        // is small enough that the ball still passes through the
-        // rollover but big enough that it doesn't fall straight down
-        // past everything to the slingshot.
-        Matter.Body.setPosition(o, { x: 120, y: PLAYFIELD_TOP });
-        Matter.Body.setVelocity(o, { x: 1.5, y: 4 });
-        Matter.Body.setAngularVelocity(o, 0);
-      });
+      const arrivalSpeed = -o.velocity.y;
+      const laneIdx = arrivalSpeed > 8 ? 0 : arrivalSpeed > 4.5 ? 1 : 2;
+      const path = this.shooterPath(this.rolloverXs[laneIdx]);
+      this.physics.defer(() => this.startTransit(o, path, 10, { x: 0, y: 3.5 }));
     });
   }
 
-  private addWall(body: Matter.Body, outline: { x: number; y: number }[], kind: WallDef['kind'] = 'rail') {
+  /** The wireform from the top of the shooter lane, across the back panel,
+   *  down into the chosen skill lane. Also drawn by the Renderer. */
+  shooterPath(laneX: number): Pt[] {
+    return [
+      { x: this.launchX, y: 172 },
+      { x: 496, y: 152 },
+      { x: 430, y: 142 },
+      { x: 340, y: 140 },
+      { x: laneX + 22, y: 148 },
+      { x: laneX, y: 164 },
+      { x: laneX, y: 186 },
+    ];
+  }
+
+  // ── Ball transit (ramp / shooter path following) ─────────────────────────
+
+  private startTransit(ball: Matter.Body, path: Pt[], speed: number, exitVel: Pt) {
+    if ((ball as unknown as { $transit?: boolean }).$transit) return;
+    const cum: number[] = [0];
+    let total = 0;
+    for (let i = 1; i < path.length; i++) {
+      total += Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+      cum.push(total);
+    }
+    setTransit(ball, true);
+    ball.isSensor = true;
+    Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+    Matter.Body.setAngularVelocity(ball, 0);
+    Matter.Body.setPosition(ball, { x: path[0].x, y: path[0].y });
+    this.transits.push({ ball, path, cum, total, dist: 0, speed, exitVel });
+  }
+
+  private tickTransits(dtMs: number) {
+    for (let i = this.transits.length - 1; i >= 0; i--) {
+      const t = this.transits[i];
+      t.dist += t.speed * (dtMs / (1000 / 60));
+      if (t.dist >= t.total) {
+        const end = t.path[t.path.length - 1];
+        Matter.Body.setPosition(t.ball, { x: end.x, y: end.y });
+        t.ball.isSensor = false;
+        setTransit(t.ball, false);
+        Matter.Body.setVelocity(t.ball, { x: t.exitVel.x, y: t.exitVel.y });
+        this.transits.splice(i, 1);
+        continue;
+      }
+      // Sample the polyline at arc length t.dist.
+      let seg = 1;
+      while (seg < t.cum.length - 1 && t.cum[seg] < t.dist) seg++;
+      const a = t.path[seg - 1];
+      const b = t.path[seg];
+      const segLen = t.cum[seg] - t.cum[seg - 1] || 1;
+      const f = (t.dist - t.cum[seg - 1]) / segLen;
+      Matter.Body.setPosition(t.ball, { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f });
+      Matter.Body.setVelocity(t.ball, { x: 0, y: 0 });
+    }
+  }
+
+  // ── Walls / static geometry ──────────────────────────────────────────────
+
+  private addWall(body: Matter.Body, kind: WallDef['kind'] = 'rail') {
     this.physics.add(body);
-    this.walls.push({ body, outline, kind });
+    this.walls.push({ body, outline: polyOf(body), kind });
+  }
+
+  private rail(x1: number, y1: number, x2: number, y2: number, thickness = 6) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.hypot(dx, dy);
+    const body = Matter.Bodies.rectangle((x1 + x2) / 2, (y1 + y2) / 2, len, thickness, {
+      isStatic: true,
+      angle: Math.atan2(dy, dx),
+      label: 'wall',
+      chamfer: { radius: Math.min(3, thickness / 2 - 0.1) },
+    });
+    this.addWall(body, 'rail');
   }
 
   private buildWalls() {
@@ -481,131 +541,75 @@ export class Playfield {
       Matter.Bodies.rectangle(-t / 2, H / 2, t, H, { isStatic: true, label: 'wall' }),
       Matter.Bodies.rectangle(W + t / 2, H / 2, t, H, { isStatic: true, label: 'wall' }),
     ]) {
-      this.addWall(w, [], 'wood');
+      this.physics.add(w);
+      this.walls.push({ body: w, outline: [], kind: 'wood' });
     }
 
-    // ── SHOOTER LANE walls ──
-    // Inner wall (separates the shooter lane from the playfield), runs from
-    // PLAYFIELD_TOP all the way down to just above the plunger.
-    const laneWallY1 = PLAYFIELD_TOP + 4;
-    const laneWallY2 = H - 32;
-    {
-      const cy = (laneWallY1 + laneWallY2) / 2;
-      const len = laneWallY2 - laneWallY1;
-      const wall = Matter.Bodies.rectangle(this.laneInnerX, cy, 6, len, {
-        isStatic: true, label: 'wall',
-      });
-      this.addWall(wall, polyOf(wall), 'rail');
-    }
-    // Shooter-lane EXIT sensor — when the ball clears the top of the lane
-    // moving upward, it's teleported into the upper playfield (a "shooter
-    // habitrail" on a real Stern table feeds the ball over the back of the
-    // playfield and dumps it at the top of one of the lanes). This is more
-    // reliable than a reflective wall because the launched ball's apex
-    // depends on plunger power and per-step velocity capping; a sensor
-    // always fires regardless.
+    // ── SHOOTER LANE ──
+    // Inner wall separating the lane from the playfield.
+    this.rail(this.laneInnerX, 176, this.laneInnerX, H - 32, 6);
+    // Exit sensor at the top of the lane: a ball that clears it starts the
+    // wireform transit into a skill lane; a weak plunge never reaches it and
+    // rolls back onto the plunger.
     const launchExitSensor = Matter.Bodies.rectangle(
       this.launchX,
-      PLAYFIELD_TOP - 40,        // y = 160 — above the lane wall top
+      172,
       this.laneOuterX - this.laneInnerX,
       8,
       { isStatic: true, isSensor: true, label: 'launch-exit' },
     );
     this.physics.add(launchExitSensor);
 
-    // Visible CHROME HABITRAIL drawn over the apron — purely cosmetic, but
-    // shows the player the path the launched ball takes. Stored in
-    // `habitrails[]` so the renderer picks it up.
-    this.habitrails.push({
-      points: [
-        { x: this.launchX, y: PLAYFIELD_TOP - 40 },
-        { x: this.launchX - 30, y: HUD_BOTTOM + 30 },
-        { x: this.playCenter + 80, y: HUD_BOTTOM + 14 },
-        { x: this.playCenter, y: HUD_BOTTOM + 12 },
-        { x: this.playCenter - 90, y: HUD_BOTTOM + 22 },
-        { x: 80, y: PLAYFIELD_TOP - 16 },
-      ],
-      tone: 'chrome',
-    });
-    // Apron-side back wall — full-width metal rail just inside the apron,
-    // EXCLUDING the launch-lane area so a launched ball can still travel
-    // upward to trip the launch-exit sensor. Without this, balls flipped
-    // hard enough to apex above PLAYFIELD_TOP would visibly fly into the
-    // HUD band before falling back, then sometimes get caught in apron-
-    // area dead zones. Position is well above the rollover lanes (y=220)
-    // and above the launch-exit sensor (y=160) so neither is blocked.
-    {
-      const fromX = 6;
-      const toX = this.laneInnerX - 4;
-      const cx = (fromX + toX) / 2;
-      const div = Matter.Bodies.rectangle(cx, PLAYFIELD_TOP - 32, toX - fromX, 6, {
-        isStatic: true, label: 'wall',
-      });
-      this.addWall(div, polyOf(div), 'rail');
+    // Back wall across the top of the play area (the shooter lane stays open).
+    this.rail(6, 172, this.laneInnerX - 4, 172, 6);
+
+    // Rounded top corners: diagonals deflecting edge shots toward the lanes.
+    this.rail(6, 250, 148, 180, 6);
+    this.rail(this.playRight - 6, 250, this.playRight - 148, 180, 6);
+
+    // ── ROLLOVER LANE GUIDES — four short rails making three real lanes. ──
+    for (const gx of [165, 215, 265, 315]) {
+      this.rail(gx, 202, gx, 248, 5);
+      this.postPositions.push({ x: gx, y: 250, r: 4 });
     }
 
-    // ── BOTTOM PLAYFIELD GEOMETRY ──
+    // ── BOTTOM GEOMETRY — proper inlanes and outlanes.
     //
-    // After several attempts at 2-channel inlane/outlane structures (which
-    // kept producing wedge bugs because 2D top-down pinball has no
-    // playfield friction — balls bounce in narrow channels forever), the
-    // bottom is now SIMPLIFIED to the essentials:
+    //   wall │ outlane │ rail │ inlane │ slingshot …flippers… │ (mirror)
+    //         x<42        42     42-84    84+
     //
-    //   * Slingshot triangle (already created above) — its vertical OUTER
-    //     edge serves as the visual + physical "inlane wall"
-    //   * A single angled DEFLECTOR rail per side, anchored at the
-    //     slingshot's bottom-outer corner, sloping DOWN-IN to a point
-    //     above the flipper pivot. This catches a ball falling outside
-    //     the slingshot and redirects it onto the flipper bat.
-    //   * Open space outside the slingshot (between slingshot and the
-    //     cabinet wall) acts as the outlane — ball drains naturally.
-    //
-    // No vertical outlane walls and no inlane channel — the ball can
-    // always escape sideways, which prevents the corner-trap bug.
+    // Each side is one L-shaped guide: a vertical rail splitting outlane
+    // from inlane, then a diagonal return that feeds the flipper. Balls in
+    // the outlane (outside the rail) drain; balls in the inlane roll down
+    // the diagonal onto the flipper.
+    const railX = 42;
+    const railTop = 608;
+    const railBot = 740;
 
-    const slingBotInnerL = this.playCenter - (this.flipperGap - 22);   // = 152
-    const slingBotInnerR = 2 * this.playCenter - slingBotInnerL;       // = 328
-    const slingBotY = this.flipperY - 64 + 28;                         // = 724
+    // The return diagonals MUST stop short of the flipper root: the bat is a
+    // dynamic body, and a static rail overlapping its swept volume jams the
+    // swing solid (the collision solver cancels the rotation every step).
+    // Ending ~18 px from the pivot leaves a gap far smaller than the ball.
+    this.rail(railX, railTop, railX, railBot, 6);
+    this.rail(railX, railBot, 104, 750, 6);
+    // Right side (mirror; the shooter-lane wall is the outer boundary).
+    const rRailX = this.playRight - railX; // 438
+    this.rail(rRailX, railTop, rRailX, railBot, 6);
+    this.rail(rRailX, railBot, this.playRight - 104, 750, 6);
 
-    {
-      // LEFT deflector: from slingshot bottom-INNER corner DOWN-IN toward
-      // the left flipper pivot. Ball coming off the slingshot's live edge
-      // gets a controlled drop onto the flipper bat top.
-      const x1 = slingBotInnerL - 2;
-      const y1 = slingBotY + 2;
-      const x2 = this.playCenter - this.flipperGap + 4;
-      const y2 = this.flipperY - 16;
-      const dx = x2 - x1, dy = y2 - y1;
-      const len = Math.hypot(dx, dy);
-      const w = Matter.Bodies.rectangle((x1 + x2) / 2, (y1 + y2) / 2, len, 6, {
-        isStatic: true, angle: Math.atan2(dy, dx), label: 'wall',
-      });
-      this.addWall(w, polyOf(w), 'rail');
-    }
-    {
-      // RIGHT deflector: mirror.
-      const x1 = slingBotInnerR + 2;
-      const y1 = slingBotY + 2;
-      const x2 = this.playCenter + this.flipperGap - 4;
-      const y2 = this.flipperY - 16;
-      const dx = x2 - x1, dy = y2 - y1;
-      const len = Math.hypot(dx, dy);
-      const w = Matter.Bodies.rectangle((x1 + x2) / 2, (y1 + y2) / 2, len, 6, {
-        isStatic: true, angle: Math.atan2(dy, dx), label: 'wall',
-      });
-      this.addWall(w, polyOf(w), 'rail');
-    }
+    // Decorative posts that make the lane mouths readable.
+    this.postPositions.push(
+      { x: railX, y: railTop - 8, r: 5 },
+      { x: rRailX, y: railTop - 8, r: 5 },
+      { x: 84, y: 644, r: 5 },
+      { x: this.playRight - 84, y: 644, r: 5 },
+    );
+  }
 
-    // ── Decorative metal posts at the slingshot corners and flipper
-    //    pivots. These are the visible chrome posts that hold the rubbers
-    //    in place on a real playfield, and they help the player read the
-    //    flipper / slingshot geometry. ──
-    this.postPositions = [
-      { x: 70, y: this.flipperY - 28 },                                 // left slingshot top-outer
-      { x: this.playRight - 70, y: this.flipperY - 28 },                // right slingshot top-outer
-      { x: this.playCenter - this.flipperGap, y: this.flipperY - 6 },   // left flipper pivot
-      { x: this.playCenter + this.flipperGap, y: this.flipperY - 6 },   // right flipper pivot
-    ];
+  // ── Ball management ──────────────────────────────────────────────────────
+
+  hasBall(body: Matter.Body): boolean {
+    return this.balls.some((b) => b.body === body);
   }
 
   resetBall() {
@@ -616,20 +620,28 @@ export class Playfield {
     } else {
       this.balls[0].setPosition(this.launchX, this.launchRestY);
     }
+    // New ball in play: skill-shot lanes re-arm.
+    for (const r of this.rollovers) r.reset();
   }
 
-  serveBall(): Ball {
+  /** Serve a fresh ball onto the plunger. With `autoLaunch` (used while a
+   *  game is in progress, e.g. after a Bean lock) the machine plunges it
+   *  itself after a beat. */
+  serveBall(autoLaunch = false): Ball {
     const b = new Ball(this.launchX, this.launchRestY);
     this.balls.push(b);
     this.physics.add(b.body);
+    if (autoLaunch) this.autoLaunchMs = 700;
     return b;
   }
 
+  /** Remove a ball from play. The array shrinks immediately (so callers can
+   *  count remaining balls synchronously); the physics body is removed
+   *  after the current step. */
   removeBall(ball: Matter.Body) {
-    this.physics.defer(() => {
-      this.physics.remove(ball);
-      this.balls = this.balls.filter((b) => b.body !== ball);
-    });
+    this.balls = this.balls.filter((b) => b.body !== ball);
+    this.transits = this.transits.filter((t) => t.ball !== ball);
+    this.physics.defer(() => this.physics.remove(ball));
   }
 
   isBallInLaunchLane(ball: Matter.Body): boolean {
@@ -641,17 +653,27 @@ export class Playfield {
     this.rightFlipper.setActive(right);
   }
 
-  applyPlungerLaunch(forceMag: number) {
+  /** Launch whichever ball is sitting in the shooter lane. `pull` is the
+   *  plunger pull fraction (0..1); a weak pull won't clear the lane. */
+  applyPlungerLaunch(pull: number) {
+    if (pull <= 0) return;
     const lane = this.balls.find((b) => this.isBallInLaunchLane(b.body));
     if (!lane) return;
-    if (forceMag <= 0) return;
     Matter.Body.setVelocity(lane.body, {
       x: 0,
-      y: -Math.min(28, 8 + forceMag * 600),
+      y: -(PLUNGER_MIN_LAUNCH + pull * PLUNGER_LAUNCH_RANGE),
     });
   }
 
   tick(dtMs: number) {
+    this.clockMs += dtMs;
+    this.tickTransits(dtMs);
+
+    if (this.autoLaunchMs > 0) {
+      this.autoLaunchMs -= dtMs;
+      if (this.autoLaunchMs <= 0) this.applyPlungerLaunch(0.95);
+    }
+
     this.bean.tick(dtMs);
     for (const p of this.popBumpers) p.tick(dtMs);
     for (const s of this.slingshots) s.tick(dtMs);
@@ -666,39 +688,29 @@ export class Playfield {
     this.lakeMichiganScoop.tick(dtMs, SCOOP_HOLD_MS);
   }
 
+  /** Start multiball: spawn the locked balls fanned out around the Bean. */
   releaseLocks(): number {
     const count = this.bean.locked;
     this.bean.releaseLocks();
-    // Multiball balls spawn AT THE BEAN (their visual home) and fan out
-    // across the upper playfield with downward velocity. Previously they
-    // all spawned stacked at the plunger, which produced clipping and
-    // both balls would funnel into the same launch-exit sensor — second
-    // ball teleported onto the first. Spreading them spatially means
-    // they immediately drop into different play zones.
-    const spreadX = [-70, 0, +70];
-    const spreadVx = [-3, 0, +3];
+    const spreadX = [-70, 0, 70];
     for (let i = 0; i < count; i++) {
       const b = this.serveBall();
       Matter.Body.setPosition(b.body, {
         x: this.bean.cx + (spreadX[i] ?? 0),
-        y: this.bean.cy + this.bean.radius + 24,
+        y: spreadX[i] === 0 ? this.bean.cy - this.bean.radius - 14 : 270,
       });
-      Matter.Body.setVelocity(b.body, {
-        x: spreadVx[i] ?? 0,
-        y: 4,
-      });
+      Matter.Body.setVelocity(b.body, { x: (spreadX[i] ?? 0) / 24, y: 3 });
       Matter.Body.setAngularVelocity(b.body, 0);
     }
     return count;
   }
-
 }
 
-function norm(v: { x: number; y: number }) {
+function norm(v: Pt): Pt {
   const m = Math.hypot(v.x, v.y) || 1;
   return { x: v.x / m, y: v.y / m };
 }
 
-function polyOf(body: Matter.Body): { x: number; y: number }[] {
+function polyOf(body: Matter.Body): Pt[] {
   return body.vertices.map((v) => ({ x: v.x, y: v.y }));
 }

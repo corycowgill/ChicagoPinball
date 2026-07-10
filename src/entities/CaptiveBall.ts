@@ -2,53 +2,74 @@ import Matter from 'matter-js';
 import { COLOR } from '../constants';
 import { metalPost, softShadow } from '../Graphics';
 
-/** A captive ball: a real Matter ball constrained to a short horizontal lane.
- *  The player's ball strikes it through the lane's open side, momentum
- *  transfers, and each hit registers a score. */
+/** A captive ball in a short vertical lane along the right side of the
+ *  playfield. The lane is open at the bottom except for two stop posts:
+ *  the captive rests on them, the player's ball strikes it from below
+ *  through the gap, and neither ball can pass the posts. A pin constraint
+ *  to the top of the lane (a short pendulum) guarantees the captive can
+ *  never leave the lane even under a violent hit. */
 export class CaptiveBall {
   readonly ball: Matter.Body;
   readonly walls: Matter.Body[] = [];
+  readonly tether: Matter.Constraint;
+  /** Stop-post positions (drawn as chrome posts). */
+  readonly posts: { x: number; y: number; r: number }[];
   private flash = 0;
 
-  constructor(
-    public readonly x: number,
-    public readonly y: number,
-    public readonly laneLen = 60,
-  ) {
-    // The captive ball itself. Restitution lowered (was 0.85) and air
-    // friction raised (was 0.02) so a struck captive ball settles back
-    // into the lane within a few bounces instead of rocketing out the
-    // open bottom and becoming a free ball in play (which would confuse
-    // the score / drain logic).
-    this.ball = Matter.Bodies.circle(x + laneLen / 2 - 14, y, 11, {
-      restitution: 0.55,
+  /** x,y = centre of the OPEN mouth at the bottom of the lane. */
+  constructor(public readonly x: number, public readonly y: number) {
+    const laneW = 40; // inner width between the side walls
+    const laneTop = y - 74;
+    const anchorY = laneTop + 8;
+    const restY = y - 12; // captive centre when resting on the posts
+
+    this.ball = Matter.Bodies.circle(x, restY, 10, {
+      restitution: 0.4,
       friction: 0.01,
-      frictionAir: 0.06,
+      frictionAir: 0.03,
       density: 0.0024,
       label: 'captive-ball',
     });
+    // Pendulum tether from the lane top — the hard guarantee that the
+    // captive stays in its lane no matter what hits it.
+    this.tether = Matter.Constraint.create({
+      pointA: { x, y: anchorY },
+      bodyB: this.ball,
+      pointB: { x: 0, y: 0 },
+      length: restY - anchorY,
+      stiffness: 0.9,
+      damping: 0.06,
+    });
 
-    // End walls of the lane (left + right) and a top rail. The bottom is the
-    // open side facing the playfield.
     const t = 6;
+    const wallLen = y - laneTop - 4;
     this.walls.push(
-      Matter.Bodies.rectangle(x - laneLen / 2, y, t, 28, {
+      Matter.Bodies.rectangle(x - laneW / 2 - t / 2, laneTop + wallLen / 2, t, wallLen, {
+        isStatic: true,
+        label: 'wall',
+      }),
+      Matter.Bodies.rectangle(x + laneW / 2 + t / 2, laneTop + wallLen / 2, t, wallLen, {
+        isStatic: true,
+        label: 'wall',
+      }),
+      Matter.Bodies.rectangle(x, laneTop - t / 2, laneW + 2 * t, t, {
         isStatic: true,
         label: 'wall',
       }),
     );
-    this.walls.push(
-      Matter.Bodies.rectangle(x + laneLen / 2, y, t, 28, {
-        isStatic: true,
-        label: 'wall',
-      }),
-    );
-    this.walls.push(
-      Matter.Bodies.rectangle(x, y - 14, laneLen, t, {
-        isStatic: true,
-        label: 'wall',
-      }),
-    );
+    // Stop posts at the mouth. Gap between their surfaces ≈ ball diameter,
+    // so the captive rests wedged on them and the striking ball can touch
+    // it but can't squeeze into the lane.
+    const postR = 6;
+    this.posts = [
+      { x: x - 17, y, r: postR },
+      { x: x + 17, y, r: postR },
+    ];
+    for (const p of this.posts) {
+      this.walls.push(
+        Matter.Bodies.circle(p.x, p.y, p.r, { isStatic: true, label: 'wall' }),
+      );
+    }
   }
 
   pulseFlash() {
@@ -60,43 +81,42 @@ export class CaptiveBall {
   }
 
   draw(ctx: CanvasRenderingContext2D) {
-    // Lane background — a recessed slot
-    softShadow(ctx, this.x, this.y + 8, this.laneLen / 2 + 4, 14, 0.5);
+    const laneW = 40;
+    const laneTop = this.y - 74;
+    const laneH = this.y - laneTop;
+
+    // Recessed lane slot.
+    softShadow(ctx, this.x, this.y - laneH / 2, laneW / 2 + 8, laneH / 2, 0.5);
     ctx.save();
-    const grad = ctx.createLinearGradient(this.x, this.y - 12, this.x, this.y + 12);
+    const grad = ctx.createLinearGradient(this.x - laneW / 2, 0, this.x + laneW / 2, 0);
     grad.addColorStop(0, '#0a1124');
     grad.addColorStop(0.5, '#020308');
     grad.addColorStop(1, '#0a1124');
     ctx.fillStyle = grad;
-    ctx.fillRect(this.x - this.laneLen / 2, this.y - 12, this.laneLen, 24);
-
-    // Lane edge highlights
+    ctx.fillRect(this.x - laneW / 2, laneTop, laneW, laneH);
     ctx.strokeStyle = COLOR.METAL_DARK;
     ctx.lineWidth = 1.5;
-    ctx.strokeRect(this.x - this.laneLen / 2, this.y - 12, this.laneLen, 24);
+    ctx.strokeRect(this.x - laneW / 2, laneTop, laneW, laneH);
     ctx.restore();
 
-    // Posts at the open corners (visible posts that hold the rubber-bumpered
-    // opening on a real captive-ball lane).
-    metalPost(ctx, this.x - this.laneLen / 2 - 2, this.y + 14, 5);
-    metalPost(ctx, this.x + this.laneLen / 2 + 2, this.y + 14, 5);
-
-    // Captive ball
+    // Captive ball.
     const bx = this.ball.position.x;
     const by = this.ball.position.y;
     softShadow(ctx, bx + 1, by + 4, 9, 6, 0.55);
     ctx.save();
     ctx.shadowColor = COLOR.NEON_AMBER;
-    ctx.shadowBlur = 10 + 18 * this.flash;
-    const bg = ctx.createRadialGradient(bx - 4, by - 5, 1, bx, by, 11);
+    ctx.shadowBlur = 8 + 18 * this.flash;
+    const bg = ctx.createRadialGradient(bx - 4, by - 5, 1, bx, by, 10);
     bg.addColorStop(0, COLOR.BALL_HI);
     bg.addColorStop(0.55, COLOR.BALL);
     bg.addColorStop(1, COLOR.BALL_DARK);
     ctx.fillStyle = bg;
     ctx.beginPath();
-    ctx.arc(bx, by, 11, 0, Math.PI * 2);
+    ctx.arc(bx, by, 10, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
-    // Label drawn by Renderer.drawPlayfieldDecals (one source of truth).
+
+    // Stop posts at the mouth.
+    for (const p of this.posts) metalPost(ctx, p.x, p.y, p.r);
   }
 }

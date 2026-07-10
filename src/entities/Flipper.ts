@@ -45,14 +45,9 @@ export class Flipper {
       chamfer: { radius: FLIPPER_HEIGHT / 2 },
       label: side === 'left' ? 'flipper-left' : 'flipper-right',
     });
-    // Disable gravity on the bat. Constraint pins it at the pivot — the
-    // only purpose of gravity here would be to drift the bat off rest
-    // (the right flipper was settling 5-6° below rest because gravity
-    // torque imbalanced with the constraint solver). With gravity off,
-    // the bat only moves when we drive it via setAngularVelocity.
-    // body.gravityScale is a VECTOR in matter-js (not a scalar) — set both
-    // components to 0 so Matter.applyGravity sees the zero check and skips.
-    (this.body as unknown as { gravityScale: { x: number; y: number } }).gravityScale = { x: 0, y: 0 };
+    // Gravity does act on the bat (matter-js has no per-body gravity
+    // scale), but enforce() re-anchors the position and zeroes velocity
+    // after every step, so the per-step drift never accumulates.
     Matter.Body.setAngle(this.body, this.restAngle);
 
     // The pivot constraint is still useful as a backup for ball-vs-flipper
@@ -66,7 +61,13 @@ export class Flipper {
       stiffness: 1,
       length: 0,
       damping: 0.1,
-    });
+      // Position-only pin. With the default (0), the constraint also applies
+      // a torque correction every solver iteration, which fights the driven
+      // rotation and reduces the swing to ~3% of its commanded speed — the
+      // flippers looked alive but had no power. 1 disables the torque term.
+      // (Missing from @types/matter-js, hence the cast.)
+      angularStiffness: 1,
+    } as Matter.IConstraintDefinition & { angularStiffness: number });
   }
 
   setActive(v: boolean) {
@@ -90,8 +91,18 @@ export class Flipper {
     if (Math.abs(diff) < speed * 0.5) {
       // Within one step of target — hold still.
       Matter.Body.setAngularVelocity(this.body, 0);
+      Matter.Body.setVelocity(this.body, { x: 0, y: 0 });
     } else {
-      Matter.Body.setAngularVelocity(this.body, Math.sign(diff) * speed);
+      const w = Math.sign(diff) * speed;
+      Matter.Body.setAngularVelocity(this.body, w);
+      // The bat rotates about the PIVOT, not its own centre of mass — so the
+      // centre must also translate (v = ω × r). Without this, Matter resolves
+      // ball contacts as if the bat were spinning in place: the effective
+      // lever arm is halved at the tip and the surface near the root moves
+      // the WRONG way, which made resting-ball flips powerless.
+      const rx = this.body.position.x - this.pivotX;
+      const ry = this.body.position.y - this.pivotY;
+      Matter.Body.setVelocity(this.body, { x: -w * ry, y: w * rx });
     }
   }
 

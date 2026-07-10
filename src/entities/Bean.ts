@@ -12,9 +12,6 @@ import { softShadow, insertCircle } from '../Graphics';
 export class Bean {
   /** Hard chrome shell — ball bounces off the dome. */
   readonly body: Matter.Body;
-  /** No longer a separate sensor — kept as an empty stub so consumers
-   *  that reference it (collision dispatch wiring) don't have to special-case. */
-  readonly lockSensor: Matter.Body;
   readonly radius: number;
   locked = 0;
   private hitsSinceLastLock = 0;
@@ -28,13 +25,6 @@ export class Bean {
       restitution: 1.05,
       friction: 0,
       label: 'bean',
-    });
-    // Stub sensor placed off-playfield — kept so existing physics.on('bean-lock')
-    // registration doesn't error, but it'll never fire.
-    this.lockSensor = Matter.Bodies.circle(-100, -100, 1, {
-      isStatic: true,
-      isSensor: true,
-      label: 'bean-lock',
     });
   }
 

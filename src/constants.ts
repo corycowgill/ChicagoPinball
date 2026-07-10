@@ -4,37 +4,34 @@ export const PLAYFIELD_H = 960;
 export const WALL_THICKNESS = 24;
 
 export const BALL_RADIUS = 11;
-// Capped BELOW the flipper-bat thickness (FLIPPER_HEIGHT = 28). A ball at
-// 27 px/step crossed a 26 px bat in one step — Matter's discrete
-// collision detection saw the ball outside the bat at frame start, outside
-// the bat at frame end (on the OTHER side), and registered no overlap. So
-// the ball literally tunnelled through the bat. With max speed 22, the
-// ball can never traverse the full 28 px bat in one step regardless of
-// approach angle.
+// Capped BELOW the flipper-bat thickness (FLIPPER_HEIGHT = 28) so Matter's
+// discrete collision detection can never step a ball fully through the bat
+// in a single frame (which reads as the ball "tunnelling" through the
+// flipper).
 export const BALL_MAX_SPEED = 22;
 
 export const GRAVITY_Y = 0.95;
 
 export const FLIPPER_LEN = 108;
-// Bat thickness must always exceed BALL_MAX_SPEED so Matter's discrete
-// collision detection can't miss a fast-moving ball passing through the
-// bat in one step. 28 > 22 gives 6 px of safety margin.
+// Bat thickness must always exceed BALL_MAX_SPEED — see above.
 export const FLIPPER_HEIGHT = 28;
 export const FLIPPER_REST_ANGLE = 0.42;
 export const FLIPPER_ACTIVE_ANGLE = -0.42;
-// Per-frame radian increments — see Flipper.ts. Tuned so the tip sweeps
-// at 0.20 × 108 = 21.6 px/frame — fast enough to send a ball at the cap
-// (27 px/frame), still under the bat thickness (26) so no tunneling.
-export const FLIPPER_KICK_VEL = 0.20;
+// Per-frame radian increments — see Flipper.ts. Tuned so the tip sweeps at
+// 0.20 × 108 = 21.6 px/frame, fast enough to send a ball near the speed cap
+// while staying under the bat thickness (no tunnelling).
+export const FLIPPER_KICK_VEL = 0.2;
 export const FLIPPER_RETURN_VEL = 0.11;
 
-export const PLUNGER_MAX_PULL = 110;
-export const PLUNGER_KICK = 0.045;
+// Launch speed = PLUNGER_MIN_LAUNCH + pull × PLUNGER_LAUNCH_RANGE (px/step).
+// A weak pull doesn't clear the shooter lane and rolls back to the plunger;
+// the arrival speed at the top of the lane picks the skill-shot lane.
+export const PLUNGER_MIN_LAUNCH = 12;
+export const PLUNGER_LAUNCH_RANGE = 10;
 
 export const STARTING_BALLS = 3;
 
-// Multiball: how many balls to lock before launching multiball mode, and how
-// many balls launch when it starts.
+// Multiball: how many balls to lock (via the Bean) before multiball starts.
 export const LOCKS_FOR_MULTIBALL = 3;
 
 // How long the scoop holds the ball before kicking it back into play (ms).
@@ -50,16 +47,17 @@ export const POINTS = {
   BEAN: 250,
   SLINGSHOT: 50,
   DROP_TARGET: 500,
+  STANDUP: 300,
   SPINNER_REV: 25,
-  ORBIT_LEFT: 1500,
-  ORBIT_RIGHT: 1500,
-  CENTER_RAMP: 2500,
+  RAMP: 2500,
   SCOOP: 5000,
   CAPTIVE_BALL: 750,
   LOCK: 5000,
   SUPER_JACKPOT: 50000,
   MULTIBALL_JACKPOT: 7500,
   MODE_SHOT: 3000,
+  SKILL_SHOT_SIDE: 10000,
+  SKILL_SHOT_CENTER: 25000,
 };
 
 // ── Palette ────────────────────────────────────────────────────────────────
