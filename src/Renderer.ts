@@ -28,7 +28,12 @@ const APRON_TOP = HUD_BOT;
 export interface HudInfo {
   state: GameState;
   score: number;
-  ballsRemaining: number;
+  ballNumber: number;
+  playerScores: number[];
+  currentPlayer: number;
+  extraBalls: number;
+  matchNumber: number;
+  matched: boolean;
   plungerHolding: boolean;
   multiball: boolean;
   tourName: string | null;
@@ -248,8 +253,8 @@ export class Renderer {
     }
 
     if (state === GameState.TITLE) this.drawTitle(ctx, hud.highScore);
-    else if (state === GameState.GAME_OVER) this.drawGameOver(ctx, score, hud.highScore);
-    else if (state === GameState.READY) this.drawReadyHint(ctx, hud.plungerHolding);
+    else if (state === GameState.GAME_OVER) this.drawGameOver(ctx, hud);
+    else if (state === GameState.READY) this.drawReadyHint(ctx, hud);
     ctx.restore();
   }
 
@@ -748,7 +753,7 @@ export class Renderer {
   // ── HUD band (60 → 130) ────────────────────────────────────────────────
 
   private drawHUDBand(ctx: CanvasRenderingContext2D, hud: HudInfo, pf: Playfield) {
-    const { score, ballsRemaining, multiball: multiballActive } = hud;
+    const { score, multiball: multiballActive } = hud;
     ctx.save();
     // Brushed-steel HUD background
     const grad = ctx.createLinearGradient(0, HUD_TOP, 0, HUD_BOT);
@@ -791,8 +796,19 @@ export class Renderer {
     ctx.shadowBlur = 0;
     ctx.fillStyle = COLOR.TEXT_DIM;
     ctx.font = '9px "Helvetica Neue", Arial, sans-serif';
-    const ballNum = Math.min(3, Math.max(1, 3 - ballsRemaining + 1));
-    ctx.fillText(`BALL ${ballNum} / 3`, PLAYFIELD_W - 12, HUD_TOP + 40);
+    const playerTag = hud.playerScores.length > 1 ? `P${hud.currentPlayer + 1} · ` : '';
+    const ebTag = hud.extraBalls > 0 ? `  (+${hud.extraBalls} EB)` : '';
+    ctx.fillText(`${playerTag}BALL ${Math.min(3, hud.ballNumber)} / 3${ebTag}`, PLAYFIELD_W - 12, HUD_TOP + 40);
+    // Multiplayer score strip.
+    if (hud.playerScores.length > 1) {
+      ctx.font = 'bold 8px "Helvetica Neue", Arial, sans-serif';
+      const parts = hud.playerScores.map((s, i) => `P${i + 1} ${s.toLocaleString()}`);
+      for (let i = 0; i < parts.length; i++) {
+        ctx.fillStyle = i === hud.currentPlayer ? COLOR.NEON_CYAN : COLOR.TEXT_DIM;
+        ctx.textAlign = 'right';
+        ctx.fillText(parts[i], PLAYFIELD_W - 12 - (parts.length - 1 - i) * 78, HUD_TOP + 52);
+      }
+    }
 
     // Status area — boss health bar beats everything else for the slot.
     if (hud.bossActive) {
@@ -1187,7 +1203,9 @@ export class Renderer {
     ctx.restore();
   }
 
-  private drawGameOver(ctx: CanvasRenderingContext2D, score: number, highScore: number) {
+  private drawGameOver(ctx: CanvasRenderingContext2D, hud: HudInfo) {
+    const { playerScores, highScore, matchNumber, matched } = hud;
+    const best = Math.max(...playerScores);
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
     ctx.fillRect(0, APRON_TOP, PLAYFIELD_W, PLAYFIELD_H - APRON_TOP);
@@ -1197,34 +1215,52 @@ export class Renderer {
     ctx.shadowBlur = 22;
     ctx.fillStyle = COLOR.NEON_PINK;
     ctx.font = 'bold 52px "Helvetica Neue", Arial, sans-serif';
-    ctx.fillText('GAME OVER', PLAYFIELD_W / 2, 420);
+    ctx.fillText('GAME OVER', PLAYFIELD_W / 2, 400);
+    // Scoreboard — every player, winner in amber.
     ctx.shadowColor = COLOR.NEON_AMBER;
-    ctx.shadowBlur = 16;
-    ctx.fillStyle = COLOR.NEON_AMBER;
-    ctx.font = 'bold 28px "Helvetica Neue", Arial, sans-serif';
-    ctx.fillText(score.toLocaleString(), PLAYFIELD_W / 2, 480);
+    ctx.shadowBlur = 12;
+    for (let i = 0; i < playerScores.length; i++) {
+      const s = playerScores[i];
+      const isWinner = s === best;
+      ctx.fillStyle = isWinner ? COLOR.NEON_AMBER : COLOR.TEXT_DIM;
+      ctx.font = `bold ${playerScores.length > 1 ? 22 : 28}px "Helvetica Neue", Arial, sans-serif`;
+      const label = playerScores.length > 1 ? `P${i + 1}   ${s.toLocaleString()}` : s.toLocaleString();
+      ctx.fillText(label, PLAYFIELD_W / 2, 452 + i * 30);
+    }
+    const afterScores = 452 + playerScores.length * 30 + 8;
     if (highScore > 0) {
       ctx.shadowBlur = 8;
-      ctx.fillStyle = score >= highScore ? COLOR.TEXT_GOLD : COLOR.TEXT_DIM;
+      ctx.fillStyle = best >= highScore ? COLOR.TEXT_GOLD : COLOR.TEXT_DIM;
       ctx.font = 'bold 14px "Helvetica Neue", Arial, sans-serif';
       ctx.fillText(
-        score >= highScore ? '★ NEW HIGH SCORE ★' : `HIGH SCORE  ${highScore.toLocaleString()}`,
+        best >= highScore ? '★ NEW HIGH SCORE ★' : `HIGH SCORE  ${highScore.toLocaleString()}`,
         PLAYFIELD_W / 2,
-        516,
+        afterScores,
       );
     }
+    // Match sequence.
+    ctx.shadowBlur = matched ? 16 : 4;
+    ctx.shadowColor = COLOR.NEON_GREEN;
+    ctx.fillStyle = matched ? COLOR.NEON_GREEN : COLOR.TEXT_DIM;
+    ctx.font = 'bold 15px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText(
+      matched ? `MATCH  ${String(matchNumber).padStart(2, '0')} — WELL PLAYED!` : `MATCH  ${String(matchNumber).padStart(2, '0')}`,
+      PLAYFIELD_W / 2,
+      afterScores + 26,
+    );
     const blink = Math.sin(performance.now() / 300) > 0;
     if (blink) {
       ctx.shadowColor = COLOR.NEON_CYAN;
       ctx.shadowBlur = 14;
       ctx.fillStyle = COLOR.NEON_CYAN;
       ctx.font = 'bold 16px "Helvetica Neue", Arial, sans-serif';
-      ctx.fillText(IS_TOUCH ? 'TAP TO RETURN TO TITLE' : 'PRESS ENTER FOR TITLE', PLAYFIELD_W / 2, 560);
+      ctx.fillText(IS_TOUCH ? 'TAP TO RETURN TO TITLE' : 'PRESS ENTER FOR TITLE', PLAYFIELD_W / 2, afterScores + 62);
     }
     ctx.restore();
   }
 
-  private drawReadyHint(ctx: CanvasRenderingContext2D, holding: boolean) {
+  private drawReadyHint(ctx: CanvasRenderingContext2D, hud: HudInfo) {
+    const holding = hud.plungerHolding;
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -1237,6 +1273,15 @@ export class Renderer {
     else msg = holding ? 'RELEASE SPACE TO LAUNCH' : 'HOLD SPACE TO PULL PLUNGER';
     // Above the apron so it doesn't collide with the apron art.
     ctx.fillText(msg, PLAYFIELD_W / 2, 874);
+    if (hud.playerScores.length > 1) {
+      ctx.fillStyle = COLOR.NEON_CYAN;
+      ctx.font = 'bold 16px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText(`PLAYER ${hud.currentPlayer + 1}`, PLAYFIELD_W / 2, 850);
+    } else if (hud.ballNumber === 1 && !IS_TOUCH) {
+      ctx.fillStyle = COLOR.TEXT_DIM;
+      ctx.font = '10px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText('ENTER ADDS PLAYERS (UP TO 4)', PLAYFIELD_W / 2, 852);
+    }
     ctx.restore();
   }
 }
