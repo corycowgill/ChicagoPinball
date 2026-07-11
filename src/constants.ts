@@ -172,4 +172,10 @@ export const COLOR = {
   NEON_CYAN: '#3ff0ff',
   NEON_AMBER: '#ffb547',
   NEON_GREEN: '#5cff9a',
+
+  // Committed identity palette — the Chicago flag plus brass deco trim.
+  // Title/headline chrome uses these; toy lamp colors stay functional.
+  FLAG_BLUE: '#7fd1e8',
+  FLAG_RED: '#e6293e',
+  BRASS: '#d9a441',
 };

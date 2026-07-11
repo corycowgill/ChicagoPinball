@@ -1,0 +1,208 @@
+/** A dot-matrix display — the orange plasma panel of a 90s machine.
+ *  Compose a frame into the dot buffer each tick (text/bars/sprites), then
+ *  render() blits it. The unlit dot grid + bezel are cached once. */
+
+const COLS = 128;
+const ROWS = 18;
+
+/** Classic 5×7 font, one number per row, 5 bits wide (MSB left). */
+const FONT: Record<string, number[]> = {
+  '0': [0x0e, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0e],
+  '1': [0x04, 0x0c, 0x04, 0x04, 0x04, 0x04, 0x0e],
+  '2': [0x0e, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1f],
+  '3': [0x1f, 0x02, 0x04, 0x02, 0x01, 0x11, 0x0e],
+  '4': [0x02, 0x06, 0x0a, 0x12, 0x1f, 0x02, 0x02],
+  '5': [0x1f, 0x10, 0x1e, 0x01, 0x01, 0x11, 0x0e],
+  '6': [0x06, 0x08, 0x10, 0x1e, 0x11, 0x11, 0x0e],
+  '7': [0x1f, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08],
+  '8': [0x0e, 0x11, 0x11, 0x0e, 0x11, 0x11, 0x0e],
+  '9': [0x0e, 0x11, 0x11, 0x0f, 0x01, 0x02, 0x0c],
+  A: [0x0e, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11],
+  B: [0x1e, 0x11, 0x11, 0x1e, 0x11, 0x11, 0x1e],
+  C: [0x0e, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0e],
+  D: [0x1c, 0x12, 0x11, 0x11, 0x11, 0x12, 0x1c],
+  E: [0x1f, 0x10, 0x10, 0x1e, 0x10, 0x10, 0x1f],
+  F: [0x1f, 0x10, 0x10, 0x1e, 0x10, 0x10, 0x10],
+  G: [0x0e, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0f],
+  H: [0x11, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11],
+  I: [0x0e, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0e],
+  J: [0x07, 0x02, 0x02, 0x02, 0x02, 0x12, 0x0c],
+  K: [0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11],
+  L: [0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1f],
+  M: [0x11, 0x1b, 0x15, 0x15, 0x11, 0x11, 0x11],
+  N: [0x11, 0x11, 0x19, 0x15, 0x13, 0x11, 0x11],
+  O: [0x0e, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0e],
+  P: [0x1e, 0x11, 0x11, 0x1e, 0x10, 0x10, 0x10],
+  Q: [0x0e, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0d],
+  R: [0x1e, 0x11, 0x11, 0x1e, 0x14, 0x12, 0x11],
+  S: [0x0f, 0x10, 0x10, 0x0e, 0x01, 0x01, 0x1e],
+  T: [0x1f, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04],
+  U: [0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0e],
+  V: [0x11, 0x11, 0x11, 0x11, 0x11, 0x0a, 0x04],
+  W: [0x11, 0x11, 0x11, 0x15, 0x15, 0x1b, 0x11],
+  X: [0x11, 0x11, 0x0a, 0x04, 0x0a, 0x11, 0x11],
+  Y: [0x11, 0x11, 0x0a, 0x04, 0x04, 0x04, 0x04],
+  Z: [0x1f, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1f],
+  ' ': [0, 0, 0, 0, 0, 0, 0],
+  '-': [0, 0, 0, 0x0e, 0, 0, 0],
+  '+': [0, 0x04, 0x04, 0x1f, 0x04, 0x04, 0],
+  '.': [0, 0, 0, 0, 0, 0x0c, 0x0c],
+  ',': [0, 0, 0, 0, 0, 0x0c, 0x04],
+  '!': [0x04, 0x04, 0x04, 0x04, 0x04, 0, 0x04],
+  '?': [0x0e, 0x11, 0x01, 0x06, 0x04, 0, 0x04],
+  '/': [0x01, 0x01, 0x02, 0x04, 0x08, 0x10, 0x10],
+  ':': [0, 0x0c, 0x0c, 0, 0x0c, 0x0c, 0],
+  "'": [0x04, 0x04, 0x08, 0, 0, 0, 0],
+  '*': [0x04, 0x15, 0x0e, 0x1f, 0x0e, 0x15, 0x04],
+  '(': [0x02, 0x04, 0x08, 0x08, 0x08, 0x04, 0x02],
+  ')': [0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08],
+};
+
+/** Capone's mug for the boss bar — 12×10 fedora + face. */
+const CAPONE_SPRITE = [
+  0b000111111000,
+  0b011111111110,
+  0b111111111111,
+  0b000111111000,
+  0b000100001000,
+  0b000110011000,
+  0b000100001000,
+  0b000101101000,
+  0b000100001000,
+  0b000011110000,
+];
+
+function sanitize(text: string): string {
+  return text
+    .toUpperCase()
+    .replace(/✓/g, '*')
+    .replace(/×/g, 'X')
+    .replace(/[—–·]/g, '-')
+    .replace(/…/g, '...')
+    .replace(/★/g, '*')
+    .replace(/[^0-9A-Z \-+.,!?/:'*()]/g, ' ');
+}
+
+export class Dmd {
+  readonly cols = COLS;
+  readonly rows = ROWS;
+  private buf = new Uint8Array(COLS * ROWS);
+  private panel: HTMLCanvasElement | null = null;
+
+  clear() {
+    this.buf.fill(0);
+  }
+
+  dot(x: number, y: number) {
+    if (x >= 0 && x < COLS && y >= 0 && y < ROWS) this.buf[y * COLS + x] = 1;
+  }
+
+  textWidth(text: string): number {
+    return sanitize(text).length * 6 - 1;
+  }
+
+  /** Draw 5×7 text with the glyph top-left at (x, y) in dot coordinates. */
+  text(str: string, x: number, y: number) {
+    const s = sanitize(str);
+    let cx = x;
+    for (const ch of s) {
+      const glyph = FONT[ch] ?? FONT['?'];
+      for (let r = 0; r < 7; r++) {
+        const bits = glyph[r];
+        for (let c = 0; c < 5; c++) {
+          if (bits & (1 << (4 - c))) this.dot(cx + c, y + r);
+        }
+      }
+      cx += 6;
+    }
+  }
+
+  centerText(str: string, y: number) {
+    this.text(str, Math.max(0, Math.floor((COLS - this.textWidth(str)) / 2)), y);
+  }
+
+  rightText(str: string, y: number, rightX = COLS - 2) {
+    this.text(str, rightX - this.textWidth(str), y);
+  }
+
+  /** Horizontal progress bar (filled portion + 1-dot outline). */
+  bar(x: number, y: number, w: number, h: number, frac: number) {
+    const fill = Math.round(w * Math.max(0, Math.min(1, frac)));
+    for (let yy = 0; yy < h; yy++) {
+      this.dot(x, y + yy);
+      this.dot(x + w, y + yy);
+      for (let xx = 0; xx < fill; xx++) this.dot(x + xx, y + yy);
+    }
+    for (let xx = 0; xx <= w; xx++) {
+      this.dot(x + xx, y);
+      this.dot(x + xx, y + h - 1);
+    }
+  }
+
+  capone(x: number, y: number) {
+    for (let r = 0; r < CAPONE_SPRITE.length; r++) {
+      for (let c = 0; c < 12; c++) {
+        if (CAPONE_SPRITE[r] & (1 << (11 - c))) this.dot(x + c, y + r);
+      }
+    }
+  }
+
+  /** Blit the panel into the given rect. */
+  render(ctx: CanvasRenderingContext2D, px: number, py: number, pw: number, ph: number) {
+    if (!this.panel) this.panel = buildPanel(pw, ph);
+    ctx.drawImage(this.panel, px, py, pw, ph);
+    const pitchX = (pw - 10) / COLS;
+    const pitchY = (ph - 8) / ROWS;
+    const dw = Math.max(1.6, pitchX - 1.3);
+    const dh = Math.max(1.6, pitchY - 1.3);
+    const ox = px + 5;
+    const oy = py + 4;
+    ctx.save();
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        if (!this.buf[y * COLS + x]) continue;
+        const dx = ox + x * pitchX;
+        const dy = oy + y * pitchY;
+        ctx.fillStyle = '#ff9b1e';
+        ctx.fillRect(dx, dy, dw, dh);
+        ctx.fillStyle = '#ffd9a0';
+        ctx.fillRect(dx + dw * 0.25, dy + dh * 0.2, dw * 0.5, dh * 0.4);
+      }
+    }
+    ctx.restore();
+  }
+}
+
+/** Bezel + unlit dot grid, cached at 2× for crispness. */
+function buildPanel(pw: number, ph: number): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = pw * 2;
+  c.height = ph * 2;
+  const ctx = c.getContext('2d')!;
+  ctx.scale(2, 2);
+  // Bezel
+  const grad = ctx.createLinearGradient(0, 0, 0, ph);
+  grad.addColorStop(0, '#2a2f3c');
+  grad.addColorStop(0.5, '#12151e');
+  grad.addColorStop(1, '#080a10');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, pw, ph);
+  ctx.strokeStyle = 'rgba(210, 170, 90, 0.5)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, pw - 1, ph - 1);
+  // Glass
+  ctx.fillStyle = '#180b02';
+  ctx.fillRect(3, 2.5, pw - 6, ph - 5);
+  // Unlit dots
+  const pitchX = (pw - 10) / COLS;
+  const pitchY = (ph - 8) / ROWS;
+  const dw = Math.max(1.6, pitchX - 1.3);
+  const dh = Math.max(1.6, pitchY - 1.3);
+  ctx.fillStyle = 'rgba(120, 60, 15, 0.28)';
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      ctx.fillRect(5 + x * pitchX, 4 + y * pitchY, dw, dh);
+    }
+  }
+  return c;
+}
