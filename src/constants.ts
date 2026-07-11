@@ -46,8 +46,13 @@ export const LOCKS_FOR_MULTIBALL = 3;
 // How long the scoop holds the ball before kicking it back into play (ms).
 export const SCOOP_HOLD_MS = 900;
 
-// Mode duration after starting from the scoop (ms).
-export const MODE_MS = 25000;
+// City Tour: each landmark stop gives this long before the tour ends.
+export const TOUR_STOP_MS = 20000;
+
+// Nudge / tilt: each nudge adds 1 heat; heat decays per second; exceeding
+// the limit tilts — flippers dead and bonus forfeited for the ball.
+export const TILT_LIMIT = 3;
+export const TILT_DECAY_PER_S = 0.35;
 
 // Ball save: a drain within this window after launch serves a fresh ball
 // instead of costing one (once per launch).
@@ -84,13 +89,14 @@ export const POINTS = {
   LOCK: 5000,
   SUPER_JACKPOT: 50000,
   MULTIBALL_JACKPOT: 7500,
-  MODE_SHOT: 3000,
   SKILL_SHOT_SIDE: 10000,
   SKILL_SHOT_CENTER: 25000,
   LANE: 2000,
   COMBO: 1500,
   LOOP: 3000,
   BOSS_DEFEAT: 250000,
+  TOUR_STOP: 15000,
+  TOUR_COMPLETE: 100000,
 };
 
 // ── Palette ────────────────────────────────────────────────────────────────

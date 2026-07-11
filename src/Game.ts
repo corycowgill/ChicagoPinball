@@ -9,7 +9,6 @@ import {
   STARTING_BALLS,
   COLOR,
   PLAYFIELD_W,
-  MODE_MS,
   POINTS,
   BALL_SAVE_MS,
   BONUS_UNIT,
@@ -17,6 +16,9 @@ import {
   COMBO_WINDOW_MS,
   BOSS_HP,
   BOSS_MS,
+  TOUR_STOP_MS,
+  TILT_LIMIT,
+  TILT_DECAY_PER_S,
 } from './constants';
 
 const HIGH_SCORE_KEY = 'chicago-pinball-high-score';
@@ -36,6 +38,20 @@ const BONUS_UNITS: Partial<Record<ScoreEvent['kind'], number>> = {
   lane: 1,
   'skill-shot': 2,
 };
+
+/** The City Tour itinerary: each stop is one specific shot, in order. */
+export interface TourStop {
+  name: string;
+  kind: ScoreEvent['kind'];
+  letter?: string;
+}
+const TOUR_STOPS: TourStop[] = [
+  { name: 'WILLIS TOWER', kind: 'ramp', letter: 'L' },
+  { name: 'RIDE THE L', kind: 'ramp', letter: 'R' },
+  { name: 'NAVY PIER', kind: 'loop' },
+  { name: 'THE BEAN', kind: 'bean' },
+  { name: 'WRIGLEY FIELD', kind: 'captive' },
+];
 
 /** Damage each scoring event deals to Capone during the SHOWDOWN. */
 const BOSS_DAMAGE: Partial<Record<ScoreEvent['kind'], number>> = {
@@ -64,9 +80,15 @@ export class Game {
   private respawnTimer = 0;
   private highScore = loadHighScore();
 
-  // Mode + multiball
-  private modeMsLeft = 0;
+  // City Tour + multiball
+  /** Index into TOUR_STOPS, or -1 when no tour is running. */
+  private tourIdx = -1;
+  private tourMsLeft = 0;
   private multiballActive = false;
+
+  // Nudge / tilt
+  private tiltHeat = 0;
+  private tilted = false;
 
   // Per-ball progression
   private ballSaveMs = 0;
@@ -143,9 +165,26 @@ export class Game {
       this.lastComboAt = this.timeMs;
     }
 
-    // Mode bonus: every major shot during a mode pays a flat bonus on top.
-    if (this.modeMsLeft > 0 && this.isModeShot(e.kind)) {
-      pts += POINTS.MODE_SHOT;
+    // City Tour: hitting the CURRENT stop's shot advances the itinerary.
+    if (this.tourIdx >= 0) {
+      const stop = TOUR_STOPS[this.tourIdx];
+      if (e.kind === stop.kind && (!stop.letter || stop.letter === e.letter)) {
+        pts += POINTS.TOUR_STOP;
+        this.tourIdx++;
+        if (this.tourIdx >= TOUR_STOPS.length) {
+          this.tourIdx = -1;
+          this.score += POINTS.TOUR_COMPLETE;
+          this.renderer.pushToast('TOUR COMPLETE!', COLOR.NEON_AMBER, 2000);
+          this.renderer.pushToast(`+${POINTS.TOUR_COMPLETE.toLocaleString()}`, COLOR.NEON_AMBER, 2000);
+          this.renderer.triggerJackpotFlash();
+          this.sound.tourComplete();
+        } else {
+          this.tourMsLeft = TOUR_STOP_MS;
+          this.renderer.pushToast(`✓ ${stop.name} +${POINTS.TOUR_STOP.toLocaleString()}`, COLOR.INSERT_CYAN, 1300);
+          this.renderer.pushToast(`NEXT: ${TOUR_STOPS[this.tourIdx].name}`, COLOR.TEXT_DIM, 1300);
+          this.sound.tourStop();
+        }
+      }
     }
     // Multiball jackpot: ramp / scoop hits during multiball pay big.
     if (this.multiballActive && this.isJackpotShot(e.kind)) {
@@ -192,7 +231,6 @@ export class Game {
         break;
       case 'scoop':
         if (this.bossActive) this.renderer.pushToast('DIRECT HIT!', COLOR.INSERT_RED, 900);
-        else if (!this.bossLit) this.renderer.pushToast('CITY TOUR MODE', COLOR.INSERT_AMBER, 1100);
         this.sound.scoop();
         break;
       case 'lake-bonus':
@@ -235,10 +273,6 @@ export class Game {
     }
   }
 
-  private isModeShot(kind: ScoreEvent['kind']) {
-    return kind === 'ramp' || kind === 'loop' || kind === 'scoop' || kind === 'captive' || kind === 'lock';
-  }
-
   private isJackpotShot(kind: ScoreEvent['kind']) {
     return kind === 'ramp' || kind === 'loop' || kind === 'scoop';
   }
@@ -250,8 +284,11 @@ export class Game {
       this.startBoss();
       return;
     }
-    this.modeMsLeft = MODE_MS;
-    this.renderer.pushToast('CITY TOUR MODE', COLOR.INSERT_CYAN, 1400);
+    if (this.tourIdx >= 0) return; // tour already running
+    this.tourIdx = 0;
+    this.tourMsLeft = TOUR_STOP_MS;
+    this.renderer.pushToast('CITY TOUR!', COLOR.INSERT_CYAN, 1400);
+    this.renderer.pushToast(`FIRST STOP: ${TOUR_STOPS[0].name}`, COLOR.TEXT_DIM, 1400);
   }
 
   private maybeLightBoss() {
@@ -267,7 +304,7 @@ export class Game {
     this.bossActive = true;
     this.bossHp = BOSS_HP;
     this.bossMsLeft = BOSS_MS;
-    this.modeMsLeft = 0;
+    this.tourIdx = -1; // the tour yields to the showdown
     // Two-ball brawl: serve a second ball.
     this.playfield.serveBall(true);
     this.renderer.pushToast('CAPONE SHOWDOWN!', COLOR.INSERT_RED, 2000);
@@ -352,7 +389,10 @@ export class Game {
     this.sound.drain();
     this.renderer.kick(4);
     const bonus = this.bonusUnits * BONUS_UNIT * this.bonusX;
-    if (bonus > 0) {
+    if (this.tilted) {
+      // Tilting forfeits the bonus — the classic price.
+      this.renderer.pushToast('BONUS LOST — TILT', COLOR.INSERT_RED, 1500);
+    } else if (bonus > 0) {
       this.score += bonus;
       const xText = this.bonusX > 1 ? `  ×${this.bonusX}` : '';
       this.renderer.pushToast(`BONUS ${bonus.toLocaleString()}${xText}`, COLOR.NEON_AMBER, 1600);
@@ -384,11 +424,28 @@ export class Game {
       return;
     }
 
-    const allowFlippers = this.state === GameState.PLAYING || this.state === GameState.READY;
+    const allowFlippers =
+      (this.state === GameState.PLAYING || this.state === GameState.READY) && !this.tilted;
     this.playfield.setFlippers(
       allowFlippers && this.input.isDown('leftFlipper'),
       allowFlippers && this.input.isDown('rightFlipper'),
     );
+
+    // Nudging — physical shove with a tilt penalty for abuse.
+    if (this.state === GameState.PLAYING && !this.tilted) {
+      const dir = this.input.wasPressed('nudgeLeft') ? -1 : this.input.wasPressed('nudgeRight') ? 1 : 0;
+      if (dir !== 0) {
+        this.playfield.nudge(dir as -1 | 1);
+        this.renderer.kick(3);
+        this.sound.nudge();
+        this.tiltHeat += 1;
+        if (this.tiltHeat > TILT_LIMIT) {
+          this.tilted = true;
+          this.renderer.pushToast('TILT', COLOR.INSERT_RED, 2500);
+          this.sound.tilt();
+        }
+      }
+    }
     if (allowFlippers) {
       // Flipper clack + classic lane change on the press.
       if (this.input.wasPressed('leftFlipper')) {
@@ -426,7 +483,13 @@ export class Game {
     this.playfield.tick(dtMs);
     this.renderer.tick(dtMs);
 
-    if (this.modeMsLeft > 0) this.modeMsLeft = Math.max(0, this.modeMsLeft - dtMs);
+    if (this.tourIdx >= 0 && this.state === GameState.PLAYING) {
+      this.tourMsLeft -= dtMs;
+      if (this.tourMsLeft <= 0) {
+        this.tourIdx = -1;
+        this.renderer.pushToast('TOUR OVER', COLOR.TEXT_DIM, 1200);
+      }
+    }
     if (this.state === GameState.PLAYING && this.ballSaveMs > 0) {
       this.ballSaveMs = Math.max(0, this.ballSaveMs - dtMs);
     }
@@ -434,6 +497,8 @@ export class Game {
       this.bossMsLeft -= dtMs;
       if (this.bossMsLeft <= 0) this.bossFail();
     }
+    // Tilt heat cools off over time.
+    if (this.tiltHeat > 0) this.tiltHeat = Math.max(0, this.tiltHeat - (TILT_DECAY_PER_S * dtMs) / 1000);
 
     if (this.state === GameState.BALL_DRAINED) {
       this.respawnTimer -= dtMs;
@@ -455,7 +520,9 @@ export class Game {
     this.bonusX = 1;
     this.comboCount = 0;
     this.lastComboAt = -1e9;
-    this.modeMsLeft = 0;
+    this.tourIdx = -1;
+    this.tiltHeat = 0;
+    this.tilted = false;
     this.state = GameState.READY;
   }
 
@@ -476,7 +543,12 @@ export class Game {
       ballsRemaining: this.ballsRemaining,
       plungerHolding: this.playfield.plunger.isHolding(),
       multiball: this.multiballActive,
-      modeMsLeft: this.modeMsLeft,
+      tourName: this.tourIdx >= 0 ? TOUR_STOPS[this.tourIdx].name : null,
+      tourKind: this.tourIdx >= 0 ? TOUR_STOPS[this.tourIdx].kind : null,
+      tourLetter: this.tourIdx >= 0 ? TOUR_STOPS[this.tourIdx].letter ?? null : null,
+      tourMsLeft: this.tourMsLeft,
+      tiltHeat: this.tiltHeat,
+      tilted: this.tilted,
       bonusX: this.bonusX,
       ballSaveMs: this.ballSaveMs,
       highScore: this.highScore,
@@ -491,7 +563,9 @@ export class Game {
   private startGame() {
     this.score = 0;
     this.ballsRemaining = STARTING_BALLS;
-    this.modeMsLeft = 0;
+    this.tourIdx = -1;
+    this.tiltHeat = 0;
+    this.tilted = false;
     this.multiballActive = false;
     this.ballSaveMs = 0;
     this.bonusUnits = 0;
