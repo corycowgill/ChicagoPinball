@@ -74,6 +74,12 @@ export const COMBO_WINDOW_MS = 4000;
 export const BOSS_HP = 60;
 export const BOSS_MS = 45000;
 
+// Replay: first time a player crosses this score they're awarded an extra
+// ball, with the knocker. Once per player per game.
+export const REPLAY_SCORE = 500000;
+
+export const MAX_PLAYERS = 4;
+
 export const CHICAGO = ['C', 'H', 'I', 'C', 'A', 'G', 'O'] as const;
 
 export const POINTS = {

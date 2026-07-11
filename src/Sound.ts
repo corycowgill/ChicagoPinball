@@ -6,6 +6,10 @@ export class Sound {
   private master: GainNode | null = null;
   muted = false;
 
+  private musicMode: 'off' | 'main' | 'action' = 'off';
+  private musicStep = 0;
+  private musicTimer: ReturnType<typeof setInterval> | null = null;
+
   /** Call from a user-gesture handler (pointerdown / keydown). */
   unlock() {
     if (!this.ctx) {
@@ -21,7 +25,66 @@ export class Sound {
 
   toggleMute(): boolean {
     this.muted = !this.muted;
+    if (this.muted) {
+      try {
+        window.speechSynthesis?.cancel();
+      } catch {
+        /* no speech support */
+      }
+    }
     return this.muted;
+  }
+
+  // ── Music — a state-driven 8-step groove (main play vs. multiball/boss). ──
+
+  startMusic(mode: 'main' | 'action') {
+    this.musicMode = mode;
+    if (!this.musicTimer) {
+      this.musicTimer = setInterval(() => this.musicTick(), 250); // 8ths @ 120 BPM
+    }
+  }
+
+  stopMusic() {
+    this.musicMode = 'off';
+  }
+
+  private musicTick() {
+    if (this.musicMode === 'off' || this.muted || !this.ctx) return;
+    const step = this.musicStep++ % 8;
+    const MAIN_BASS = [110, 0, 131, 110, 87, 0, 131, 147];
+    const ACTION_BASS = [110, 110, 165, 110, 175, 110, 165, 147];
+    const bass = (this.musicMode === 'main' ? MAIN_BASS : ACTION_BASS)[step];
+    if (bass) this.tone(bass, 210, { type: 'triangle', vol: 0.11 });
+    if (this.musicMode === 'action' && step % 2 === 0) {
+      this.tone((bass || 110) * 4, 90, { type: 'square', vol: 0.04 });
+    }
+    if (step % 4 === 2) this.noise(28, { vol: 0.05, freq: 6500, q: 1.5 }); // hat
+  }
+
+  /** Announcer callout via speech synthesis. `priority` interrupts. */
+  speak(text: string, priority = false) {
+    if (this.muted) return;
+    try {
+      const synth = window.speechSynthesis;
+      if (!synth) return;
+      if (synth.speaking) {
+        if (!priority) return;
+        synth.cancel();
+      }
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 1.05;
+      u.pitch = 0.6;
+      u.volume = 0.9;
+      synth.speak(u);
+    } catch {
+      /* no speech support */
+    }
+  }
+
+  /** The replay knocker — a physical THWACK from inside the cabinet. */
+  knocker() {
+    this.noise(90, { vol: 0.9, freq: 180, q: 0.5 });
+    this.tone(70, 130, { type: 'square', vol: 0.4, slideTo: 48 });
   }
 
   /** One decaying oscillator; `slideTo` bends the pitch over the duration. */
