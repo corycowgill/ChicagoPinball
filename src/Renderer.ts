@@ -25,9 +25,23 @@ const HUD_TOP = 60;
 const HUD_BOT = 130;
 const APRON_TOP = HUD_BOT;
 
+export interface HudInfo {
+  state: GameState;
+  score: number;
+  ballsRemaining: number;
+  plungerHolding: boolean;
+  multiball: boolean;
+  modeMsLeft: number;
+  bonusX: number;
+  ballSaveMs: number;
+  highScore: number;
+}
+
 export class Renderer {
   private toasts: Toast[] = [];
   private flashJackpot = 0;
+  private shakeMs = 0;
+  private shakeAmp = 0;
   private stars: { x: number; y: number; r: number; tw: number }[] = [];
   private windows: { x: number; y: number; w: number; h: number; lit: boolean }[] = [];
 
@@ -54,24 +68,33 @@ export class Renderer {
   }
   triggerJackpotFlash() { this.flashJackpot = 1500; }
 
+  /** Brief screen shake (bumpers, slings, drains). */
+  kick(amp: number) {
+    this.shakeAmp = Math.max(this.shakeAmp, amp);
+    this.shakeMs = 90;
+  }
+
   tick(dtMs: number) {
     for (const t of this.toasts) t.ttl -= dtMs;
     this.toasts = this.toasts.filter((t) => t.ttl > 0);
     if (this.flashJackpot > 0) this.flashJackpot -= dtMs;
+    if (this.shakeMs > 0) {
+      this.shakeMs -= dtMs;
+      if (this.shakeMs <= 0) this.shakeAmp = 0;
+    }
   }
 
-  draw(
-    ctx: CanvasRenderingContext2D,
-    pf: Playfield,
-    state: GameState,
-    score: number,
-    ballsRemaining: number,
-    plungerHolding: boolean,
-    multiballActive: boolean,
-    modeMsLeft: number,
-  ) {
+  draw(ctx: CanvasRenderingContext2D, pf: Playfield, hud: HudInfo) {
+    const { state, score } = hud;
+    ctx.save();
+    if (this.shakeMs > 0 && this.shakeAmp > 0) {
+      ctx.translate(
+        (Math.random() - 0.5) * 2 * this.shakeAmp,
+        (Math.random() - 0.5) * 2 * this.shakeAmp,
+      );
+    }
     this.drawBackbox(ctx);
-    this.drawHUDBand(ctx, score, ballsRemaining, multiballActive, modeMsLeft, pf);
+    this.drawHUDBand(ctx, hud, pf);
     this.drawTopApron(ctx, pf);
     this.drawPlayfieldFloor(ctx);
     // Lake Michigan water surround beneath its scoop.
@@ -107,6 +130,22 @@ export class Renderer {
     // Balls last (always on top).
     for (const b of pf.balls) b.draw(ctx);
 
+    // Ball-save indicator between the flippers.
+    if (hud.ballSaveMs > 0 && state === GameState.PLAYING) {
+      const blink = Math.sin(performance.now() / 130) > -0.4;
+      if (blink) {
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = COLOR.NEON_GREEN;
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = COLOR.NEON_GREEN;
+        ctx.font = 'bold 11px "Helvetica Neue", Arial, sans-serif';
+        ctx.fillText('● BALL SAVE ●', pf.playCenter, 842);
+        ctx.restore();
+      }
+    }
+
     this.drawToasts(ctx);
 
     if (this.flashJackpot > 0) {
@@ -117,9 +156,10 @@ export class Renderer {
       ctx.restore();
     }
 
-    if (state === GameState.TITLE) this.drawTitle(ctx);
-    else if (state === GameState.GAME_OVER) this.drawGameOver(ctx, score);
-    else if (state === GameState.READY) this.drawReadyHint(ctx, plungerHolding);
+    if (state === GameState.TITLE) this.drawTitle(ctx, hud.highScore);
+    else if (state === GameState.GAME_OVER) this.drawGameOver(ctx, score, hud.highScore);
+    else if (state === GameState.READY) this.drawReadyHint(ctx, hud.plungerHolding);
+    ctx.restore();
   }
 
   // ── Backbox (top 60 px) ─────────────────────────────────────────────────
@@ -283,14 +323,8 @@ export class Renderer {
 
   // ── HUD band (60 → 130) ────────────────────────────────────────────────
 
-  private drawHUDBand(
-    ctx: CanvasRenderingContext2D,
-    score: number,
-    ballsRemaining: number,
-    multiballActive: boolean,
-    modeMsLeft: number,
-    pf: Playfield,
-  ) {
+  private drawHUDBand(ctx: CanvasRenderingContext2D, hud: HudInfo, pf: Playfield) {
+    const { score, ballsRemaining, multiball: multiballActive, modeMsLeft } = hud;
     ctx.save();
     // Brushed-steel HUD background
     const grad = ctx.createLinearGradient(0, HUD_TOP, 0, HUD_BOT);
@@ -312,6 +346,16 @@ export class Renderer {
     ctx.fillStyle = COLOR.TEXT_DIM;
     ctx.font = '9px "Helvetica Neue", Arial, sans-serif';
     ctx.fillText('THE WINDY CITY PINBALL', 12, HUD_TOP + 32);
+
+    // Bonus multiplier (left, under the name plate) when above ×1.
+    if (hud.bonusX > 1) {
+      ctx.shadowColor = COLOR.NEON_GREEN;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = COLOR.NEON_GREEN;
+      ctx.font = 'bold 13px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText(`BONUS ×${hud.bonusX}`, 12, HUD_TOP + 52);
+      ctx.shadowBlur = 0;
+    }
 
     // Score (right, BIG)
     ctx.shadowColor = COLOR.NEON_AMBER;
@@ -612,7 +656,7 @@ export class Renderer {
     ctx.restore();
   }
 
-  private drawTitle(ctx: CanvasRenderingContext2D) {
+  private drawTitle(ctx: CanvasRenderingContext2D, highScore: number) {
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
     ctx.fillRect(0, APRON_TOP, PLAYFIELD_W, PLAYFIELD_H - APRON_TOP);
@@ -637,6 +681,15 @@ export class Renderer {
     ctx.font = '13px "Helvetica Neue", Arial, sans-serif';
     ctx.fillText('LOCK 3 BALLS · SPELL CHICAGO · HIT THE SCOOP', PLAYFIELD_W / 2, 478);
 
+    if (highScore > 0) {
+      ctx.shadowColor = COLOR.NEON_AMBER;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = COLOR.TEXT_GOLD;
+      ctx.font = 'bold 15px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText(`HIGH SCORE  ${highScore.toLocaleString()}`, PLAYFIELD_W / 2, 520);
+      ctx.shadowBlur = 0;
+    }
+
     const blink = Math.sin(performance.now() / 300) > 0;
     if (blink) {
       ctx.shadowColor = COLOR.NEON_AMBER;
@@ -656,7 +709,7 @@ export class Renderer {
     ctx.restore();
   }
 
-  private drawGameOver(ctx: CanvasRenderingContext2D, score: number) {
+  private drawGameOver(ctx: CanvasRenderingContext2D, score: number, highScore: number) {
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
     ctx.fillRect(0, APRON_TOP, PLAYFIELD_W, PLAYFIELD_H - APRON_TOP);
@@ -672,6 +725,16 @@ export class Renderer {
     ctx.fillStyle = COLOR.NEON_AMBER;
     ctx.font = 'bold 28px "Helvetica Neue", Arial, sans-serif';
     ctx.fillText(score.toLocaleString(), PLAYFIELD_W / 2, 480);
+    if (highScore > 0) {
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = score >= highScore ? COLOR.TEXT_GOLD : COLOR.TEXT_DIM;
+      ctx.font = 'bold 14px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText(
+        score >= highScore ? '★ NEW HIGH SCORE ★' : `HIGH SCORE  ${highScore.toLocaleString()}`,
+        PLAYFIELD_W / 2,
+        516,
+      );
+    }
     const blink = Math.sin(performance.now() / 300) > 0;
     if (blink) {
       ctx.shadowColor = COLOR.NEON_CYAN;

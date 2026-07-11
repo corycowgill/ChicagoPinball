@@ -15,7 +15,9 @@ export class Bean {
   readonly radius: number;
   locked = 0;
   private hitsSinceLastLock = 0;
-  static readonly HITS_PER_LOCK = 4;
+  // 2 hits per lock × 3 locks = 6 Bean hits to multiball. (4 per lock made
+  // multiball a 12-hit grind nobody reached.)
+  static readonly HITS_PER_LOCK = 2;
   private flash = 0;
 
   constructor(public readonly cx: number, public readonly cy: number, radius = 38) {
