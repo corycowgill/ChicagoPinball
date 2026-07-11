@@ -111,9 +111,14 @@ export class Playfield {
   private autoLaunchMs = 0;
   private clockMs = 0;
   private lastCaptiveScoreAt = -1000;
+  private lastLeftLoopAt = -1000;
+  private lastRightLoopAt = -1000;
   /** True from launch until the first top-lane pass — that pass is the
    *  skill shot; later passes just score/light the lane. */
   private skillShotArmed = false;
+
+  /** Loop-lane entrance arrows (drawn by the Renderer). */
+  readonly loopArrowXs = [20, 462];
 
   launchRestY: number;
 
@@ -178,10 +183,12 @@ export class Playfield {
     this.bean = new Bean(this.playCenter, 300, 24);
     physics.add(this.bean.body);
 
-    // ── POP BUMPERS — triangle below the Bean. ──
-    this.popBumpers.push(new PopBumper(this.playCenter - 55, 355, 19, COLOR.INSERT_AMBER));
-    this.popBumpers.push(new PopBumper(this.playCenter + 55, 355, 19, COLOR.INSERT_RED));
-    this.popBumpers.push(new PopBumper(this.playCenter, 408, 19, COLOR.INSERT_BLUE));
+    // ── POP BUMPERS — tight triangle below the Bean. Surface-to-surface
+    //    gaps ~32 px (just over the ball) so a ball entering the nest
+    //    rattles between all three instead of sailing through. ──
+    this.popBumpers.push(new PopBumper(this.playCenter - 35, 358, 19, COLOR.INSERT_AMBER));
+    this.popBumpers.push(new PopBumper(this.playCenter + 35, 358, 19, COLOR.INSERT_RED));
+    this.popBumpers.push(new PopBumper(this.playCenter, 412, 19, COLOR.INSERT_BLUE));
     for (const p of this.popBumpers) physics.add(p.body);
 
     // ── SPORTS TEAM STANDUPS — flanking the bumper cluster, angled inward. ──
@@ -279,15 +286,32 @@ export class Playfield {
     this.cityTourScoop = new Scoop(this.playRight - 80, 545, -Math.PI / 2 - 0.35, 15);
     physics.add(this.cityTourScoop.sensor);
 
-    // ── CAPTIVE BALL — vertical lane on the far right; a left-flipper shot
-    //    straight up the right edge strikes it through the stop posts. ──
-    this.captive = new CaptiveBall(430, 494);
+    // ── CAPTIVE BALL — vertical lane on the right; a left-flipper shot up
+    //    the right side strikes it through the stop posts. Pulled inboard
+    //    (was flush with the edge) so a 34 px LOOP channel stays open
+    //    between the lane and the shooter wall. ──
+    this.captive = new CaptiveBall(420, 494);
     physics.add(this.captive.ball, this.captive.tether, ...this.captive.walls);
 
     // ── SPINNER — sits across the LEFT INLANE, so every right-ramp return
     //    (and any inlane pass) spins it. ──
     this.spinner = new Spinner(63, 678, 34);
     physics.add(this.spinner.body, this.spinner.pivot, this.spinner.stop);
+
+    // ── LOOP SENSORS — the edge channels are shootable lanes: a ball sent
+    //    up along either wall slides the channel, crosses behind the top
+    //    lanes, and falls down the far side. The sensor pays the shot. ──
+    for (const [x, label] of [
+      [20, 'left-loop'],
+      [462, 'right-loop'],
+    ] as const) {
+      const sensor = Matter.Bodies.rectangle(x, 340, 34, 10, {
+        isStatic: true,
+        isSensor: true,
+        label,
+      });
+      physics.add(sensor);
+    }
 
     // ── DRAIN sensor (across the play area only). ──
     this.drainSensor = Matter.Bodies.rectangle(
@@ -453,6 +477,20 @@ export class Playfield {
         this.events.onScore({ kind: 'lake-bonus', points: 1500 });
       }
     });
+
+    // Loop lanes: award an upward pass (rate-limited so channel rattle
+    // can't double-score).
+    const loopHandler = (side: 'left' | 'right') => (_s: Matter.Body, o: Matter.Body) => {
+      if (o.label !== 'ball') return;
+      if (Matter.Body.getVelocity(o).y > -4) return; // only fast upward passes
+      const last = side === 'left' ? this.lastLeftLoopAt : this.lastRightLoopAt;
+      if (this.clockMs - last < 1200) return;
+      if (side === 'left') this.lastLeftLoopAt = this.clockMs;
+      else this.lastRightLoopAt = this.clockMs;
+      this.events.onScore({ kind: 'loop', points: POINTS.LOOP });
+    };
+    physics.on('left-loop', loopHandler('left'));
+    physics.on('right-loop', loopHandler('right'));
 
     physics.on('drain', (_s, o) => {
       if (o.label === 'ball') this.events.onDrain(o);
@@ -624,6 +662,22 @@ export class Playfield {
       { x: rRailX, y: railTop - 8, r: 5 },
       { x: 84, y: 644, r: 5 },
       { x: this.playRight - 84, y: 644, r: 5 },
+    );
+
+    // ── RAMP MOUTH FUNNELS — short guide rails flanking each ramp mouth so
+    //    the shot is physically framed: near-misses deflect into the mouth,
+    //    slow balls fall back out of the open throat. Also breaks up the
+    //    dead zone between the banks and the slingshots. ──
+    // Left ramp mouth (150,560), shot comes from the right flipper.
+    this.rail(112, 512, 132, 556, 5);
+    this.rail(196, 516, 172, 556, 5);
+    this.postPositions.push({ x: 132, y: 558, r: 4 }, { x: 172, y: 558, r: 4 });
+    // Right ramp mouth (330,560), shot comes from the left flipper.
+    this.rail(this.playRight - 112, 512, this.playRight - 132, 556, 5);
+    this.rail(this.playRight - 196, 516, this.playRight - 172, 556, 5);
+    this.postPositions.push(
+      { x: this.playRight - 132, y: 558, r: 4 },
+      { x: this.playRight - 172, y: 558, r: 4 },
     );
   }
 

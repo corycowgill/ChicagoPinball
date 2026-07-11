@@ -26,6 +26,7 @@ const BONUS_UNITS: Partial<Record<ScoreEvent['kind'], number>> = {
   'drop-target': 2,
   standup: 1,
   ramp: 3,
+  loop: 3,
   scoop: 5,
   'lake-bonus': 3,
   captive: 2,
@@ -105,8 +106,8 @@ export class Game {
     // Bank end-of-ball bonus units.
     this.bonusUnits = Math.min(99, this.bonusUnits + (BONUS_UNITS[e.kind] ?? 0));
 
-    // Combo: chained ramp / scoop / captive shots inside the window.
-    if (e.kind === 'ramp' || e.kind === 'scoop' || e.kind === 'captive') {
+    // Combo: chained ramp / loop / scoop / captive shots inside the window.
+    if (e.kind === 'ramp' || e.kind === 'loop' || e.kind === 'scoop' || e.kind === 'captive') {
       if (this.timeMs - this.lastComboAt < COMBO_WINDOW_MS) {
         this.comboCount++;
         const comboPts = this.comboCount * POINTS.COMBO;
@@ -147,6 +148,10 @@ export class Game {
         break;
       case 'ramp':
         this.renderer.pushToast('RAMP +' + e.points.toLocaleString(), COLOR.INSERT_BLUE, 700);
+        this.sound.ramp();
+        break;
+      case 'loop':
+        this.renderer.pushToast('LOOP +' + e.points.toLocaleString(), COLOR.INSERT_PURPLE, 700);
         this.sound.ramp();
         break;
       case 'scoop':
@@ -194,11 +199,11 @@ export class Game {
   }
 
   private isModeShot(kind: ScoreEvent['kind']) {
-    return kind === 'ramp' || kind === 'scoop' || kind === 'captive' || kind === 'lock';
+    return kind === 'ramp' || kind === 'loop' || kind === 'scoop' || kind === 'captive' || kind === 'lock';
   }
 
   private isJackpotShot(kind: ScoreEvent['kind']) {
-    return kind === 'ramp' || kind === 'scoop';
+    return kind === 'ramp' || kind === 'loop' || kind === 'scoop';
   }
 
   private startMode() {

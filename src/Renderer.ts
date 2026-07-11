@@ -1,7 +1,7 @@
 import { COLOR, PLAYFIELD_W, PLAYFIELD_H, CHICAGO } from './constants';
 import { Playfield, PLAYFIELD_TOP } from './scene/Playfield';
 import { GameState } from './types';
-import { metalPost, strokeMetalPath } from './Graphics';
+import { metalPost, strokeMetalPath, insertArrow } from './Graphics';
 
 interface Toast {
   text: string;
@@ -595,6 +595,19 @@ export class Renderer {
     ctx.font = 'bold 9px "Helvetica Neue", Arial, sans-serif';
     ctx.fillText('CAPTIVE', pf.captive.x, pf.captive.y - 86);
 
+    ctx.restore();
+
+    // Loop-lane entrance arrows along the edge channels.
+    for (const x of pf.loopArrowXs) {
+      insertArrow(ctx, x, 590, 11, -Math.PI / 2, COLOR.INSERT_PURPLE, true);
+    }
+    ctx.save();
+    ctx.font = 'bold 8px "Helvetica Neue", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = COLOR.INSERT_PURPLE;
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 3;
+    for (const x of pf.loopArrowXs) ctx.fillText('LOOP', x, 614);
     ctx.restore();
   }
 
