@@ -42,6 +42,11 @@ export class Renderer {
   private flashJackpot = 0;
   private shakeMs = 0;
   private shakeAmp = 0;
+  /** Cached static art. UNDER = floor/art/wireform below the toys; OVER =
+   *  decals/walls/posts above them. Rebuilding gradients, shadows and text
+   *  every frame was most of the frame cost — the geometry never moves. */
+  private staticUnder: HTMLCanvasElement | null = null;
+  private staticOver: HTMLCanvasElement | null = null;
   private stars: { x: number; y: number; r: number; tw: number }[] = [];
   private windows: { x: number; y: number; w: number; h: number; lit: boolean }[] = [];
 
@@ -86,6 +91,8 @@ export class Renderer {
 
   draw(ctx: CanvasRenderingContext2D, pf: Playfield, hud: HudInfo) {
     const { state, score } = hud;
+    const hot = hud.multiball || hud.modeMsLeft > 0;
+    this.ensureStaticLayers(pf);
     ctx.save();
     if (this.shakeMs > 0 && this.shakeAmp > 0) {
       ctx.translate(
@@ -95,17 +102,13 @@ export class Renderer {
     }
     this.drawBackbox(ctx);
     this.drawHUDBand(ctx, hud, pf);
-    this.drawTopApron(ctx, pf);
-    this.drawPlayfieldFloor(ctx);
-    // Lake Michigan water surround beneath its scoop.
-    this.drawLakeMichigan(ctx, pf);
-    // Chrome shooter wireform at the back of the playfield — the launched
-    // ball actually rides this path (see Playfield.shooterPath); drawn to
-    // the centre lane, the branch into the outer lanes is implied.
-    strokeMetalPath(ctx, pf.shooterPath(pf.rolloverXs[1]), 4);
+    // Static under-layer: top apron band, floor + art, lake pool, wireform.
+    if (this.staticUnder) ctx.drawImage(this.staticUnder, 0, 0, PLAYFIELD_W, PLAYFIELD_H);
+    // Animated lake shimmer over the static pool.
+    this.drawLakeShimmer(ctx, pf);
     // Ramps (raised translucent plates) — drawn before toys so toys layer on top.
-    pf.leftRamp.draw(ctx);
-    pf.rightRamp.draw(ctx);
+    pf.leftRamp.draw(ctx, hot);
+    pf.rightRamp.draw(ctx, hot);
     // Toys.
     pf.bank.draw(ctx);
     pf.captive.draw(ctx);
@@ -120,31 +123,26 @@ export class Renderer {
     pf.leftFlipper.draw(ctx);
     pf.rightFlipper.draw(ctx);
     pf.plunger.draw(ctx);
-    // Decals (text labels) drawn LAST so they're never obscured by ramps,
-    // toys, or other rendered geometry.
-    this.drawPlayfieldDecals(ctx, pf);
-    this.drawStandupLabels(ctx, pf);
-    // Walls + posts (steel).
-    this.drawWalls(ctx, pf);
-    for (const p of pf.postPositions) metalPost(ctx, p.x, p.y, p.r ?? 5);
-    // Balls last (always on top).
-    for (const b of pf.balls) b.draw(ctx);
-
-    // Ball-save indicator between the flippers.
-    if (hud.ballSaveMs > 0 && state === GameState.PLAYING) {
-      const blink = Math.sin(performance.now() / 130) > -0.4;
-      if (blink) {
-        ctx.save();
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.shadowColor = COLOR.NEON_GREEN;
-        ctx.shadowBlur = 12;
-        ctx.fillStyle = COLOR.NEON_GREEN;
-        ctx.font = 'bold 11px "Helvetica Neue", Arial, sans-serif';
-        ctx.fillText('● BALL SAVE ●', pf.playCenter, 842);
-        ctx.restore();
+    // Static over-layer: decals, labels, walls, posts, loop arrows.
+    if (this.staticOver) ctx.drawImage(this.staticOver, 0, 0, PLAYFIELD_W, PLAYFIELD_H);
+    // Loop arrows pulse while their shot pays extra.
+    if (hot && Math.sin(performance.now() / 120) > 0) {
+      ctx.save();
+      ctx.strokeStyle = COLOR.INSERT_PURPLE;
+      ctx.shadowColor = COLOR.INSERT_PURPLE;
+      ctx.shadowBlur = 12;
+      ctx.lineWidth = 2;
+      for (const x of pf.loopArrowXs) {
+        ctx.beginPath();
+        ctx.arc(x, 590, 16, 0, Math.PI * 2);
+        ctx.stroke();
       }
+      ctx.restore();
     }
+    // Balls (with trails) — then the apron covers the drain area, so a
+    // draining ball visibly rolls in underneath it.
+    for (const b of pf.balls) b.draw(ctx);
+    this.drawApron(ctx, pf, hud);
 
     this.drawToasts(ctx);
 
@@ -159,6 +157,146 @@ export class Renderer {
     if (state === GameState.TITLE) this.drawTitle(ctx, hud.highScore);
     else if (state === GameState.GAME_OVER) this.drawGameOver(ctx, score, hud.highScore);
     else if (state === GameState.READY) this.drawReadyHint(ctx, hud.plungerHolding);
+    ctx.restore();
+  }
+
+  // ── Static layer cache ───────────────────────────────────────────────────
+
+  private ensureStaticLayers(pf: Playfield) {
+    if (this.staticUnder && this.staticOver) return;
+    const make = () => {
+      const c = document.createElement('canvas');
+      c.width = PLAYFIELD_W * 2;
+      c.height = PLAYFIELD_H * 2;
+      const cctx = c.getContext('2d')!;
+      cctx.scale(2, 2);
+      return { c, cctx };
+    };
+
+    const under = make();
+    this.drawTopApron(under.cctx, pf);
+    this.drawPlayfieldFloor(under.cctx);
+    this.drawFloorArt(under.cctx, pf);
+    this.drawLakePool(under.cctx, pf);
+    // Chrome shooter wireform at the back — the launched ball actually rides
+    // this path (see Playfield.shooterPath); drawn to the centre lane, the
+    // branch into the outer lanes is implied.
+    strokeMetalPath(under.cctx, pf.shooterPath(pf.rolloverXs[1]), 4);
+    this.staticUnder = under.c;
+
+    const over = make();
+    this.drawPlayfieldDecals(over.cctx, pf);
+    this.drawStandupLabels(over.cctx, pf);
+    this.drawWalls(over.cctx, pf);
+    for (const p of pf.postPositions) metalPost(over.cctx, p.x, p.y, p.r ?? 5);
+    this.staticOver = over.c;
+  }
+
+  /** Painted playfield art: Chicago-flag band with the four red stars,
+   *  a faint street grid, GI light pools, and the Bean's plaza ring. */
+  private drawFloorArt(ctx: CanvasRenderingContext2D, pf: Playfield) {
+    ctx.save();
+
+    // Street grid — faint avenues over the whole playfield.
+    ctx.strokeStyle = 'rgba(120, 160, 220, 0.05)';
+    ctx.lineWidth = 1;
+    for (let x = 60; x < pf.playRight; x += 60) {
+      ctx.beginPath();
+      ctx.moveTo(x, PLAYFIELD_TOP + 10);
+      ctx.lineTo(x, PLAYFIELD_H - 40);
+      ctx.stroke();
+    }
+
+    // Chicago-flag band across the open strip between the ramp funnels and
+    // the slingshots: pale-blue stripe with four red six-pointed stars.
+    const bandY = 592;
+    ctx.fillStyle = 'rgba(120, 190, 235, 0.10)';
+    ctx.fillRect(60, bandY, pf.playRight - 120, 28);
+    ctx.fillStyle = 'rgba(255, 60, 70, 0.5)';
+    for (let i = 0; i < 4; i++) {
+      const sx = pf.playCenter - 72 + i * 48;
+      drawStar6(ctx, sx, bandY + 14, 8);
+    }
+
+    // GI light pools — warm glow around the bumper nest and the flippers.
+    for (const pool of [
+      { x: pf.playCenter, y: 380, r: 120, c: '255, 200, 130', a: 0.05 },
+      { x: pf.playCenter, y: 760, r: 130, c: '150, 200, 255', a: 0.05 },
+    ]) {
+      const g = ctx.createRadialGradient(pool.x, pool.y, 10, pool.x, pool.y, pool.r);
+      g.addColorStop(0, `rgba(${pool.c}, ${pool.a})`);
+      g.addColorStop(1, `rgba(${pool.c}, 0)`);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(pool.x, pool.y, pool.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Cloud Gate plaza — concentric rings under the Bean.
+    ctx.strokeStyle = 'rgba(180, 200, 230, 0.10)';
+    ctx.lineWidth = 2;
+    for (const r of [34, 44]) {
+      ctx.beginPath();
+      ctx.arc(pf.bean.cx, pf.bean.cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  /** Lower apron covering the drain area — a draining ball rolls in under
+   *  it, like a real machine. Carries the SHOOT AGAIN (ball save) lamp. */
+  private drawApron(ctx: CanvasRenderingContext2D, pf: Playfield, hud: HudInfo) {
+    const topY = 898;
+    ctx.save();
+    // Body.
+    const grad = ctx.createLinearGradient(0, topY, 0, PLAYFIELD_H);
+    grad.addColorStop(0, '#7c1420');
+    grad.addColorStop(0.5, '#540d16');
+    grad.addColorStop(1, '#2e060c');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(0, 946);
+    ctx.lineTo(168, topY);
+    ctx.lineTo(312, topY);
+    ctx.lineTo(pf.playRight, 946);
+    ctx.lineTo(pf.playRight, PLAYFIELD_H);
+    ctx.lineTo(0, PLAYFIELD_H);
+    ctx.closePath();
+    ctx.fill();
+    // Chrome trim along the top edge.
+    ctx.strokeStyle = COLOR.METAL_LIGHT;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, 946);
+    ctx.lineTo(168, topY);
+    ctx.lineTo(312, topY);
+    ctx.lineTo(pf.playRight, 946);
+    ctx.stroke();
+
+    // Apron art: star + wordmark.
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.font = 'bold 14px "Helvetica Neue", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('CHICAGO', pf.playCenter, 944);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+    drawStar6(ctx, pf.playCenter - 58, 944, 6);
+    drawStar6(ctx, pf.playCenter + 58, 944, 6);
+
+    // SHOOT AGAIN lamp — lit while ball save is armed.
+    const saveOn = hud.ballSaveMs > 0 && hud.state === GameState.PLAYING;
+    const blink = saveOn && Math.sin(performance.now() / 130) > -0.4;
+    ctx.shadowColor = COLOR.NEON_GREEN;
+    ctx.shadowBlur = blink ? 14 : 0;
+    ctx.fillStyle = blink ? COLOR.NEON_GREEN : 'rgba(92, 255, 154, 0.15)';
+    ctx.beginPath();
+    ctx.arc(pf.playCenter, 916, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = blink ? '#ffffff' : 'rgba(255, 255, 255, 0.35)';
+    ctx.font = 'bold 8px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText('SHOOT AGAIN', pf.playCenter, 928);
     ctx.restore();
   }
 
@@ -498,8 +636,8 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** Subtle blue water patch beneath the Lake Michigan scoop. */
-  private drawLakeMichigan(ctx: CanvasRenderingContext2D, pf: import('./scene/Playfield').Playfield) {
+  /** Static blue water pool beneath the Lake Michigan scoop (cached). */
+  private drawLakePool(ctx: CanvasRenderingContext2D, pf: Playfield) {
     const cx = pf.lakeMichiganScoop.x;
     const cy = pf.lakeMichiganScoop.y;
     ctx.save();
@@ -510,7 +648,14 @@ export class Renderer {
     ctx.beginPath();
     ctx.ellipse(cx, cy, 56, 48, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Wave shimmer
+    ctx.restore();
+  }
+
+  /** Animated wave shimmer over the lake pool (drawn every frame). */
+  private drawLakeShimmer(ctx: CanvasRenderingContext2D, pf: Playfield) {
+    const cx = pf.lakeMichiganScoop.x;
+    const cy = pf.lakeMichiganScoop.y;
+    ctx.save();
     ctx.strokeStyle = 'rgba(120, 180, 220, 0.55)';
     ctx.lineWidth = 1;
     const t = performance.now() / 80;
@@ -770,9 +915,25 @@ export class Renderer {
     let msg: string;
     if (IS_TOUCH) msg = holding ? 'RELEASE TO LAUNCH' : 'TAP & HOLD TO PULL PLUNGER';
     else msg = holding ? 'RELEASE SPACE TO LAUNCH' : 'HOLD SPACE TO PULL PLUNGER';
-    ctx.fillText(msg, PLAYFIELD_W / 2, PLAYFIELD_H - 40);
+    // Above the apron so it doesn't collide with the apron art.
+    ctx.fillText(msg, PLAYFIELD_W / 2, 874);
     ctx.restore();
   }
+}
+
+/** Six-pointed star (the Chicago flag star). */
+function drawStar6(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
+  ctx.beginPath();
+  for (let i = 0; i < 12; i++) {
+    const a = (i * Math.PI) / 6 - Math.PI / 2;
+    const rad = i % 2 === 0 ? r : r * 0.45;
+    const x = cx + Math.cos(a) * rad;
+    const y = cy + Math.sin(a) * rad;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
 }
 
 function rgbOf(hex: string): string {

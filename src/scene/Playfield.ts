@@ -753,6 +753,7 @@ export class Playfield {
   tick(dtMs: number) {
     this.clockMs += dtMs;
     this.tickTransits(dtMs);
+    for (const b of this.balls) b.pushTrail();
 
     if (this.autoLaunchMs > 0) {
       this.autoLaunchMs -= dtMs;

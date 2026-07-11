@@ -70,7 +70,8 @@ export class Ramp {
     if (this.flash > 0) this.flash = Math.max(0, this.flash - dtMs / 600);
   }
 
-  draw(ctx: CanvasRenderingContext2D) {
+  /** `hot` pulses the mouth arrow (mode / multiball — the shot pays extra). */
+  draw(ctx: CanvasRenderingContext2D, hot = false) {
     // Glow when freshly made.
     const alpha = 0.34 + this.flash * 0.4;
     strokePlasticRamp(ctx, this.plate, this.color, 26, alpha);
@@ -78,6 +79,17 @@ export class Ramp {
     strokeMetalPath(ctx, this.habitrail, 4);
     // Backlit arrow at the mouth pointing up the ramp.
     insertArrow(ctx, this.arrowAt.x, this.arrowAt.y, 13, this.arrowAngle, this.color, true);
+    if (hot && Math.sin(performance.now() / 120) > 0) {
+      ctx.save();
+      ctx.strokeStyle = this.color;
+      ctx.shadowColor = this.color;
+      ctx.shadowBlur = 14;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(this.arrowAt.x, this.arrowAt.y, 19, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
     // Theme text alongside the plate.
     ctx.save();
     const mid = this.plate[Math.floor(this.plate.length / 2)];

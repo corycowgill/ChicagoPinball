@@ -3,6 +3,8 @@ import { BALL_RADIUS, BALL_MAX_SPEED, PHYSICS_SUBSTEPS, COLOR } from '../constan
 
 export class Ball {
   readonly body: Matter.Body;
+  /** Recent positions for the motion trail (newest last). */
+  private trail: { x: number; y: number }[] = [];
   /** Number of consecutive frames the ball has been near-stationary;
    *  used by the anti-stuck nudge in tick(). */
   private stuckFrames = 0;
@@ -66,11 +68,32 @@ export class Ball {
     Matter.Body.setPosition(this.body, { x, y });
     Matter.Body.setVelocity(this.body, { x: 0, y: 0 });
     Matter.Body.setAngularVelocity(this.body, 0);
+    this.trail.length = 0;
+  }
+
+  /** Record the current position for the motion trail (once per frame). */
+  pushTrail() {
+    this.trail.push({ x: this.body.position.x, y: this.body.position.y });
+    if (this.trail.length > 6) this.trail.shift();
   }
 
   draw(ctx: CanvasRenderingContext2D) {
     const { x, y } = this.body.position;
     const r = BALL_RADIUS;
+
+    // Motion trail — fading ghosts along recent positions. Invisible when
+    // slow (the points overlap the ball), a comet streak at speed.
+    ctx.save();
+    for (let i = 0; i < this.trail.length; i++) {
+      const p = this.trail[i];
+      const f = (i + 1) / this.trail.length;
+      ctx.globalAlpha = f * 0.16;
+      ctx.fillStyle = '#cfe0ff';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r * (0.35 + 0.5 * f), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
 
     // Ground shadow (more elliptical = ball is closer to playfield)
     ctx.save();
