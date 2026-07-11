@@ -1,4 +1,5 @@
 import { COLOR, PLAYFIELD_W, PLAYFIELD_H, CHICAGO, BOSS_HP } from './constants';
+import { Dmd } from './Dmd';
 import { Playfield, PLAYFIELD_TOP } from './scene/Playfield';
 import { GameState } from './types';
 import { metalPost, strokeMetalPath, insertArrow } from './Graphics';
@@ -55,6 +56,7 @@ export interface HudInfo {
 
 export class Renderer {
   private toasts: Toast[] = [];
+  private dmd = new Dmd();
   private flashJackpot = 0;
   private shakeMs = 0;
   private shakeAmp = 0;
@@ -120,6 +122,7 @@ export class Renderer {
     this.drawHUDBand(ctx, hud, pf);
     // Static under-layer: top apron band, floor + art, lake pool, wireform.
     if (this.staticUnder) ctx.drawImage(this.staticUnder, 0, 0, PLAYFIELD_W, PLAYFIELD_H);
+    this.drawChicagoStrip(ctx, pf);
     // Animated lake shimmer over the static pool.
     this.drawLakeShimmer(ctx, pf);
     // Ramps (raised translucent plates) — drawn before toys so toys layer on top.
@@ -161,8 +164,8 @@ export class Renderer {
     // Loop arrows pulse while their shot pays extra.
     if ((hot || hud.tourKind === 'loop') && Math.sin(performance.now() / 120) > 0) {
       ctx.save();
-      ctx.strokeStyle = COLOR.INSERT_PURPLE;
-      ctx.shadowColor = COLOR.INSERT_PURPLE;
+      ctx.strokeStyle = COLOR.FLAG_BLUE;
+      ctx.shadowColor = COLOR.FLAG_BLUE;
       ctx.shadowBlur = 12;
       ctx.lineWidth = 2;
       for (const x of pf.loopArrowXs) {
@@ -241,8 +244,6 @@ export class Renderer {
     // draining ball visibly rolls in underneath it.
     for (const b of pf.balls) b.draw(ctx);
     this.drawApron(ctx, pf, hud);
-
-    this.drawToasts(ctx);
 
     if (this.flashJackpot > 0) {
       const a = Math.min(0.45, (this.flashJackpot / 1500) * 0.45);
@@ -495,7 +496,7 @@ export class Renderer {
     }
 
     // Deco accent lines inside the top corner diagonals.
-    ctx.strokeStyle = 'rgba(63, 240, 255, 0.13)';
+    ctx.strokeStyle = 'rgba(127, 209, 232, 0.15)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(16, 252);
@@ -503,6 +504,22 @@ export class Renderer {
     ctx.moveTo(pf.playRight - 16, 252);
     ctx.lineTo(pf.playRight - 152, 186);
     ctx.stroke();
+
+    // Brass deco border framing the playfield, with corner fans.
+    ctx.strokeStyle = 'rgba(217, 164, 65, 0.20)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(10, 180, pf.playRight - 20, PLAYFIELD_H - 192);
+    ctx.strokeStyle = 'rgba(217, 164, 65, 0.13)';
+    for (const [cx, cy, a0] of [
+      [10, PLAYFIELD_H - 12, -Math.PI / 2],
+      [pf.playRight - 10, PLAYFIELD_H - 12, Math.PI],
+    ] as const) {
+      for (let i = 1; i <= 3; i++) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, i * 12, a0, a0 + Math.PI / 2);
+        ctx.stroke();
+      }
+    }
 
     ctx.restore();
   }
@@ -565,12 +582,14 @@ export class Renderer {
       ctx.restore();
     }
 
-    // Apron art: star + wordmark.
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    // Apron art: star + deco wordmark.
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '6px';
+    ctx.fillStyle = COLOR.BRASS;
     ctx.font = 'bold 14px "Helvetica Neue", Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('CHICAGO', pf.playCenter, 944);
+    ctx.fillText('CHICAGO', pf.playCenter + 3, 944);
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '0px';
     ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
     drawStar6(ctx, pf.playCenter - 58, 944, 6);
     drawStar6(ctx, pf.playCenter + 58, 944, 6);
@@ -627,6 +646,24 @@ export class Renderer {
       ctx.fillRect(w.x, w.y, w.w, w.h);
     }
     this.drawCTATrain(ctx, performance.now());
+
+    // Brand plate — deco letterspaced title on the backbox glass.
+    ctx.save();
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '5px';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = COLOR.FLAG_RED;
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = COLOR.FLAG_RED;
+    ctx.font = 'bold 13px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText('CHICAGO', PLAYFIELD_W / 2, 11);
+    ctx.shadowBlur = 0;
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '2px';
+    ctx.fillStyle = COLOR.BRASS;
+    ctx.font = '7px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText('THE WINDY CITY', PLAYFIELD_W / 2, 22);
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '0px';
+    ctx.restore();
 
     // Bottom edge — chrome bezel between backbox and HUD.
     ctx.fillStyle = COLOR.METAL_DARK;
@@ -752,154 +789,74 @@ export class Renderer {
 
   // ── HUD band (60 → 130) ────────────────────────────────────────────────
 
+  /** The HUD band is now a dot-matrix display: score + status + event text
+   *  on orange plasma, like the machine's real display. */
   private drawHUDBand(ctx: CanvasRenderingContext2D, hud: HudInfo, pf: Playfield) {
-    const { score, multiball: multiballActive } = hud;
-    ctx.save();
-    // Brushed-steel HUD background
-    const grad = ctx.createLinearGradient(0, HUD_TOP, 0, HUD_BOT);
-    grad.addColorStop(0, '#161e2e');
-    grad.addColorStop(0.5, '#0c1322');
-    grad.addColorStop(1, '#0a0f1c');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, HUD_TOP, PLAYFIELD_W, HUD_BOT - HUD_TOP);
+    const d = this.dmd;
+    d.clear();
 
-    // Game-name plate (left)
-    ctx.shadowColor = COLOR.NEON_PINK;
-    ctx.shadowBlur = 12;
-    ctx.fillStyle = COLOR.NEON_PINK;
-    ctx.font = 'bold 16px "Helvetica Neue", Arial, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('CHICAGO', 12, HUD_TOP + 18);
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = COLOR.TEXT_DIM;
-    ctx.font = '9px "Helvetica Neue", Arial, sans-serif';
-    ctx.fillText('THE WINDY CITY PINBALL', 12, HUD_TOP + 32);
+    // Top line: player/ball at left, score at right.
+    const playerTag = hud.playerScores.length > 1 ? `P${hud.currentPlayer + 1} ` : '';
+    const ebTag = hud.extraBalls > 0 ? ` +${hud.extraBalls}EB` : '';
+    d.text(`${playerTag}BALL ${Math.min(3, hud.ballNumber)}${ebTag}`, 2, 1);
+    d.rightText(hud.score.toLocaleString(), 1);
 
-    // Bonus multiplier (left, under the name plate) when above ×1.
-    if (hud.bonusX > 1) {
-      ctx.shadowColor = COLOR.NEON_GREEN;
-      ctx.shadowBlur = 10;
-      ctx.fillStyle = COLOR.NEON_GREEN;
-      ctx.font = 'bold 13px "Helvetica Neue", Arial, sans-serif';
-      ctx.fillText(`BONUS ×${hud.bonusX}`, 12, HUD_TOP + 52);
-      ctx.shadowBlur = 0;
-    }
-
-    // Score (right, BIG)
-    ctx.shadowColor = COLOR.NEON_AMBER;
-    ctx.shadowBlur = 18;
-    ctx.fillStyle = COLOR.NEON_AMBER;
-    ctx.font = 'bold 30px "Helvetica Neue", Arial, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText(score.toLocaleString(), PLAYFIELD_W - 12, HUD_TOP + 22);
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = COLOR.TEXT_DIM;
-    ctx.font = '9px "Helvetica Neue", Arial, sans-serif';
-    const playerTag = hud.playerScores.length > 1 ? `P${hud.currentPlayer + 1} · ` : '';
-    const ebTag = hud.extraBalls > 0 ? `  (+${hud.extraBalls} EB)` : '';
-    ctx.fillText(`${playerTag}BALL ${Math.min(3, hud.ballNumber)} / 3${ebTag}`, PLAYFIELD_W - 12, HUD_TOP + 40);
-    // Multiplayer score strip.
-    if (hud.playerScores.length > 1) {
-      ctx.font = 'bold 8px "Helvetica Neue", Arial, sans-serif';
-      const parts = hud.playerScores.map((s, i) => `P${i + 1} ${s.toLocaleString()}`);
-      for (let i = 0; i < parts.length; i++) {
-        ctx.fillStyle = i === hud.currentPlayer ? COLOR.NEON_CYAN : COLOR.TEXT_DIM;
-        ctx.textAlign = 'right';
-        ctx.fillText(parts[i], PLAYFIELD_W - 12 - (parts.length - 1 - i) * 78, HUD_TOP + 52);
+    // Bottom line — priority: fresh event > boss bar > tour > multiball >
+    // showdown lit > tilt warning > multiplayer strip.
+    const latest = this.toasts[this.toasts.length - 1];
+    const blink = Math.floor(performance.now() / 250) % 2 === 0;
+    if (latest && latest.total - latest.ttl < 2400) {
+      if (latest.total - latest.ttl < 350 || blink || latest.total - latest.ttl > 900) {
+        d.centerText(latest.text, 10);
       }
-    }
-
-    // Status area — boss health bar beats everything else for the slot.
-    if (hud.bossActive) {
-      const barW = 170;
-      const barH = 12;
-      const bx = PLAYFIELD_W / 2 - barW / 2;
-      const by = HUD_TOP + 10;
-      ctx.save();
-      ctx.fillStyle = 'rgba(40, 8, 12, 0.9)';
-      ctx.fillRect(bx - 2, by - 2, barW + 4, barH + 4);
-      const frac = Math.max(0, hud.bossHp) / BOSS_HP;
-      ctx.shadowColor = COLOR.INSERT_RED;
-      ctx.shadowBlur = 12;
-      ctx.fillStyle = COLOR.INSERT_RED;
-      ctx.fillRect(bx, by, barW * frac, barH);
-      ctx.shadowBlur = 0;
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(bx - 2, by - 2, barW + 4, barH + 4);
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 9px "Helvetica Neue", Arial, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(`CAPONE  ·  ${Math.ceil(hud.bossMsLeft / 1000)}s`, PLAYFIELD_W / 2, by + barH + 9);
-      ctx.restore();
-    } else if (multiballActive) {
-      this.statusPill(ctx, 'MULTIBALL', COLOR.NEON_AMBER, PLAYFIELD_W / 2, HUD_TOP + 16);
+    } else if (hud.bossActive) {
+      d.capone(2, 8);
+      d.bar(17, 11, 74, 5, Math.max(0, hud.bossHp) / BOSS_HP);
+      d.rightText(`${Math.max(0, Math.ceil(hud.bossMsLeft / 1000))}S`, 10);
     } else if (hud.tourName) {
-      this.statusPill(
-        ctx,
-        `TOUR · ${hud.tourName} · ${Math.max(0, Math.ceil(hud.tourMsLeft / 1000))}s`,
-        COLOR.INSERT_CYAN,
-        PLAYFIELD_W / 2,
-        HUD_TOP + 16,
-      );
-    } else if (hud.bossLit) {
-      this.statusPill(ctx, 'SHOWDOWN LIT', COLOR.INSERT_RED, PLAYFIELD_W / 2, HUD_TOP + 16);
-    }
-    if (!hud.tilted && hud.tiltHeat >= 2) {
-      this.statusPill(ctx, 'CAREFUL!', COLOR.INSERT_RED, PLAYFIELD_W / 2, HUD_TOP + 38);
+      d.centerText(`TOUR: ${hud.tourName} ${Math.max(0, Math.ceil(hud.tourMsLeft / 1000))}S`, 10);
+    } else if (hud.multiball) {
+      if (blink) d.centerText('MULTIBALL', 10);
+    } else if (hud.tilted) {
+      if (blink) d.centerText('TILT', 10);
+    } else if (!hud.tilted && hud.tiltHeat >= 2) {
+      d.centerText('CAREFUL!', 10);
+    } else if (hud.bossLit && hud.state === GameState.PLAYING) {
+      if (blink) d.centerText('SHOWDOWN AT THE SCOOP', 10);
+    } else if (hud.playerScores.length > 1) {
+      const strip = hud.playerScores.map((s, i) => `${i === hud.currentPlayer ? '*' : ''}P${i + 1} ${abbrev(s)}`).join('  ');
+      d.centerText(strip, 10);
+    } else if (hud.bonusX > 1) {
+      d.centerText(`BONUS X${hud.bonusX}`, 10);
     }
 
-    // CHICAGO progress strip (bottom of HUD)
-    const lit = pf.bank.litMask();
-    const cellW = 22;
-    const totalW = CHICAGO.length * cellW + (CHICAGO.length - 1) * 4;
-    const startX = (PLAYFIELD_W - totalW) / 2;
-    for (let i = 0; i < CHICAGO.length; i++) {
-      const x = startX + i * (cellW + 4);
-      const cy = HUD_TOP + 56;
-      // Cell back
-      ctx.fillStyle = lit[i] ? '#0a3848' : '#0a1224';
-      ctx.fillRect(x, cy, cellW, 18);
-      ctx.shadowColor = COLOR.NEON_CYAN;
-      ctx.shadowBlur = lit[i] ? 16 : 0;
-      ctx.strokeStyle = lit[i] ? COLOR.NEON_CYAN : 'rgba(63, 240, 255, 0.3)';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(x, cy, cellW, 18);
-      ctx.fillStyle = lit[i] ? '#ffffff' : 'rgba(255, 255, 255, 0.45)';
-      ctx.font = 'bold 13px "Helvetica Neue", Arial, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(CHICAGO[i], x + cellW / 2, cy + 9);
-    }
-    ctx.shadowBlur = 0;
-    ctx.restore();
+    d.render(ctx, 4, HUD_TOP + 2, PLAYFIELD_W - 8, HUD_BOT - HUD_TOP - 4);
   }
 
-  private statusPill(
-    ctx: CanvasRenderingContext2D,
-    text: string,
-    color: string,
-    cx: number,
-    cy: number,
-  ) {
+  /** CHICAGO progress lamp row — drawn over the top apron band (must run
+   *  AFTER the static under-layer, which paints that region). */
+  private drawChicagoStrip(ctx: CanvasRenderingContext2D, pf: Playfield) {
+    const lit = pf.bank.litMask();
+    const cellW = 20;
+    const totalW = CHICAGO.length * cellW + (CHICAGO.length - 1) * 4;
+    const startX = (PLAYFIELD_W - totalW) / 2;
     ctx.save();
-    ctx.font = 'bold 12px "Helvetica Neue", Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const w = ctx.measureText(text).width + 18;
-    const h = 18;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 12;
-    ctx.fillStyle = `rgba(${rgbOf(color)}, 0.18)`;
-    ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.2;
-    ctx.strokeRect(cx - w / 2, cy - h / 2, w, h);
-    ctx.fillStyle = '#ffffff';
-    ctx.shadowBlur = 6;
-    ctx.fillText(text, cx, cy);
+    for (let i = 0; i < CHICAGO.length; i++) {
+      const x = startX + i * (cellW + 4);
+      const cy = HUD_BOT + 4;
+      ctx.fillStyle = lit[i] ? '#0a3848' : '#0a1224';
+      ctx.fillRect(x, cy, cellW, 16);
+      ctx.shadowColor = COLOR.FLAG_BLUE;
+      ctx.shadowBlur = lit[i] ? 14 : 0;
+      ctx.strokeStyle = lit[i] ? COLOR.FLAG_BLUE : 'rgba(127, 209, 232, 0.3)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x, cy, cellW, 16);
+      ctx.fillStyle = lit[i] ? '#ffffff' : 'rgba(255, 255, 255, 0.45)';
+      ctx.font = 'bold 12px "Helvetica Neue", Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(CHICAGO[i], x + cellW / 2, cy + 8);
+    }
     ctx.restore();
   }
 
@@ -1078,14 +1035,15 @@ export class Renderer {
 
     ctx.restore();
 
-    // Loop-lane entrance arrows along the edge channels.
+    // Loop-lane entrance arrows along the edge channels (flag blue — part
+    // of the committed palette).
     for (const x of pf.loopArrowXs) {
-      insertArrow(ctx, x, 590, 11, -Math.PI / 2, COLOR.INSERT_PURPLE, true);
+      insertArrow(ctx, x, 590, 11, -Math.PI / 2, COLOR.FLAG_BLUE, true);
     }
     ctx.save();
     ctx.font = 'bold 8px "Helvetica Neue", Arial, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillStyle = COLOR.INSERT_PURPLE;
+    ctx.fillStyle = COLOR.FLAG_BLUE;
     ctx.shadowColor = '#000';
     ctx.shadowBlur = 3;
     for (const x of pf.loopArrowXs) ctx.fillText('LOOP', x, 614);
@@ -1124,31 +1082,8 @@ export class Renderer {
     ctx.restore();
   }
 
-  // ── Toasts + overlays ─────────────────────────────────────────────────
-
-  private drawToasts(ctx: CanvasRenderingContext2D) {
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    let i = 0;
-    for (const t of this.toasts) {
-      const a = Math.min(1, t.ttl / 600);
-      const offset = (1 - t.ttl / t.total) * -16;
-      ctx.shadowColor = t.color;
-      ctx.shadowBlur = 18;
-      ctx.fillStyle = '#ffffff';
-      ctx.globalAlpha = a;
-      ctx.font = 'bold 22px "Helvetica Neue", Arial, sans-serif';
-      // Stronger contrast: white text with colored shadow.
-      ctx.fillText(t.text, PLAYFIELD_W / 2, 700 + i * 30 + offset);
-      ctx.fillStyle = t.color;
-      ctx.shadowBlur = 0;
-      ctx.font = 'bold 22px "Helvetica Neue", Arial, sans-serif';
-      ctx.fillText(t.text, PLAYFIELD_W / 2, 700 + i * 30 + offset);
-      i++;
-    }
-    ctx.restore();
-  }
+  // ── Overlays ──────────────────────────────────────────────────────────
+  // (Event text now renders on the DMD — see drawHUDBand.)
 
   private drawTitle(ctx: CanvasRenderingContext2D, highScore: number) {
     ctx.save();
@@ -1158,17 +1093,53 @@ export class Renderer {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    ctx.shadowColor = COLOR.NEON_PINK;
-    ctx.shadowBlur = 28;
-    ctx.fillStyle = COLOR.NEON_PINK;
-    ctx.font = 'bold 64px "Helvetica Neue", Arial, sans-serif';
-    ctx.fillText('CHICAGO', PLAYFIELD_W / 2, 380);
+    // Deco frame: double rules with a centre diamond, brass on night blue.
+    ctx.strokeStyle = COLOR.BRASS;
+    ctx.lineWidth = 1.5;
+    for (const y of [332, 338]) {
+      ctx.beginPath();
+      ctx.moveTo(80, y);
+      ctx.lineTo(PLAYFIELD_W - 80, y);
+      ctx.stroke();
+    }
+    ctx.fillStyle = COLOR.BRASS;
+    ctx.beginPath();
+    ctx.moveTo(PLAYFIELD_W / 2, 327);
+    ctx.lineTo(PLAYFIELD_W / 2 + 8, 335);
+    ctx.lineTo(PLAYFIELD_W / 2, 343);
+    ctx.lineTo(PLAYFIELD_W / 2 - 8, 335);
+    ctx.closePath();
+    ctx.fill();
 
-    ctx.shadowColor = COLOR.NEON_CYAN;
-    ctx.shadowBlur = 14;
-    ctx.fillStyle = COLOR.NEON_CYAN;
-    ctx.font = 'bold 22px "Helvetica Neue", Arial, sans-serif';
-    ctx.fillText('THE WINDY CITY PINBALL', PLAYFIELD_W / 2, 432);
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '10px';
+    ctx.shadowColor = COLOR.FLAG_RED;
+    ctx.shadowBlur = 26;
+    ctx.fillStyle = COLOR.FLAG_RED;
+    ctx.font = 'bold 60px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText('CHICAGO', PLAYFIELD_W / 2 + 5, 386);
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = COLOR.BRASS;
+    ctx.lineWidth = 1.2;
+    ctx.strokeText('CHICAGO', PLAYFIELD_W / 2 + 5, 386);
+
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '6px';
+    ctx.shadowColor = COLOR.FLAG_BLUE;
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = COLOR.FLAG_BLUE;
+    ctx.font = 'bold 18px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText('THE WINDY CITY PINBALL', PLAYFIELD_W / 2 + 3, 432);
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '0px';
+
+    // Lower deco rule mirrors the top.
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = COLOR.BRASS;
+    ctx.lineWidth = 1.5;
+    for (const y of [452, 458]) {
+      ctx.beginPath();
+      ctx.moveTo(120, y);
+      ctx.lineTo(PLAYFIELD_W - 120, y);
+      ctx.stroke();
+    }
 
     ctx.shadowBlur = 0;
     ctx.fillStyle = COLOR.TEXT;
@@ -1301,9 +1272,10 @@ function drawStar6(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: num
   ctx.fill();
 }
 
-function rgbOf(hex: string): string {
-  if (hex.startsWith('rgb')) return hex.slice(hex.indexOf('(') + 1, hex.indexOf(')'));
-  let h = hex.replace('#', '');
-  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
-  return `${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)}`;
+/** Compact score for the DMD multiplayer strip: 12,345 → 12.3K. */
+function abbrev(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 10_000) return `${Math.floor(n / 1000)}K`;
+  return String(n);
 }
+
