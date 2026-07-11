@@ -31,7 +31,12 @@ export interface HudInfo {
   ballsRemaining: number;
   plungerHolding: boolean;
   multiball: boolean;
-  modeMsLeft: number;
+  tourName: string | null;
+  tourKind: string | null;
+  tourLetter: string | null;
+  tourMsLeft: number;
+  tiltHeat: number;
+  tilted: boolean;
   bonusX: number;
   ballSaveMs: number;
   highScore: number;
@@ -95,7 +100,7 @@ export class Renderer {
 
   draw(ctx: CanvasRenderingContext2D, pf: Playfield, hud: HudInfo) {
     const { state, score } = hud;
-    const hot = hud.multiball || hud.modeMsLeft > 0 || hud.bossActive;
+    const hot = hud.multiball || hud.bossActive;
     this.ensureStaticLayers(pf);
     ctx.save();
     if (this.shakeMs > 0 && this.shakeAmp > 0) {
@@ -111,8 +116,8 @@ export class Renderer {
     // Animated lake shimmer over the static pool.
     this.drawLakeShimmer(ctx, pf);
     // Ramps (raised translucent plates) — drawn before toys so toys layer on top.
-    pf.leftRamp.draw(ctx, hot);
-    pf.rightRamp.draw(ctx, hot);
+    pf.leftRamp.draw(ctx, hot || (hud.tourKind === 'ramp' && hud.tourLetter === 'L'));
+    pf.rightRamp.draw(ctx, hot || (hud.tourKind === 'ramp' && hud.tourLetter === 'R'));
     // Toys.
     pf.bank.draw(ctx);
     pf.captive.draw(ctx);
@@ -147,7 +152,7 @@ export class Renderer {
     }
 
     // Loop arrows pulse while their shot pays extra.
-    if (hot && Math.sin(performance.now() / 120) > 0) {
+    if ((hot || hud.tourKind === 'loop') && Math.sin(performance.now() / 120) > 0) {
       ctx.save();
       ctx.strokeStyle = COLOR.INSERT_PURPLE;
       ctx.shadowColor = COLOR.INSERT_PURPLE;
@@ -158,6 +163,36 @@ export class Renderer {
         ctx.arc(x, 590, 16, 0, Math.PI * 2);
         ctx.stroke();
       }
+      ctx.restore();
+    }
+
+    // Tour-stop halos for the Bean / captive stops.
+    if ((hud.tourKind === 'bean' || hud.tourKind === 'captive') && Math.sin(performance.now() / 120) > 0) {
+      ctx.save();
+      ctx.strokeStyle = COLOR.INSERT_CYAN;
+      ctx.shadowColor = COLOR.INSERT_CYAN;
+      ctx.shadowBlur = 14;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      if (hud.tourKind === 'bean') {
+        ctx.arc(pf.bean.cx, pf.bean.cy, pf.bean.radius + 10, 0, Math.PI * 2);
+      } else {
+        ctx.arc(pf.captive.x, pf.captive.y - 10, 32, 0, Math.PI * 2);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // TILT — dead flippers until the ball drains.
+    if (hud.tilted) {
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = COLOR.INSERT_RED;
+      ctx.shadowBlur = 26;
+      ctx.fillStyle = COLOR.INSERT_RED;
+      ctx.font = 'bold 54px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText('TILT', pf.playCenter, 560);
       ctx.restore();
     }
     // Balls (with trails) — then the apron covers the drain area, so a
@@ -676,7 +711,7 @@ export class Renderer {
   // ── HUD band (60 → 130) ────────────────────────────────────────────────
 
   private drawHUDBand(ctx: CanvasRenderingContext2D, hud: HudInfo, pf: Playfield) {
-    const { score, ballsRemaining, multiball: multiballActive, modeMsLeft } = hud;
+    const { score, ballsRemaining, multiball: multiballActive } = hud;
     ctx.save();
     // Brushed-steel HUD background
     const grad = ctx.createLinearGradient(0, HUD_TOP, 0, HUD_BOT);
@@ -748,10 +783,19 @@ export class Renderer {
       ctx.restore();
     } else if (multiballActive) {
       this.statusPill(ctx, 'MULTIBALL', COLOR.NEON_AMBER, PLAYFIELD_W / 2, HUD_TOP + 16);
-    } else if (modeMsLeft > 0) {
-      this.statusPill(ctx, `MODE ${(modeMsLeft / 1000).toFixed(0)}s`, COLOR.INSERT_CYAN, PLAYFIELD_W / 2, HUD_TOP + 16);
+    } else if (hud.tourName) {
+      this.statusPill(
+        ctx,
+        `TOUR · ${hud.tourName} · ${Math.max(0, Math.ceil(hud.tourMsLeft / 1000))}s`,
+        COLOR.INSERT_CYAN,
+        PLAYFIELD_W / 2,
+        HUD_TOP + 16,
+      );
     } else if (hud.bossLit) {
       this.statusPill(ctx, 'SHOWDOWN LIT', COLOR.INSERT_RED, PLAYFIELD_W / 2, HUD_TOP + 16);
+    }
+    if (!hud.tilted && hud.tiltHeat >= 2) {
+      this.statusPill(ctx, 'CAREFUL!', COLOR.INSERT_RED, PLAYFIELD_W / 2, HUD_TOP + 38);
     }
 
     // CHICAGO progress strip (bottom of HUD)

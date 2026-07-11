@@ -5,7 +5,9 @@ export type VirtualKey =
   | 'rightFlipper'
   | 'plunger'
   | 'enter'
-  | 'mute';
+  | 'mute'
+  | 'nudgeLeft'
+  | 'nudgeRight';
 
 const KEY_MAP: Record<string, VirtualKey> = {
   KeyZ: 'leftFlipper',
@@ -18,6 +20,8 @@ const KEY_MAP: Record<string, VirtualKey> = {
   Enter: 'enter',
   NumpadEnter: 'enter',
   KeyM: 'mute',
+  KeyC: 'nudgeLeft',
+  KeyN: 'nudgeRight',
 };
 
 export type TouchKeyResolver = (

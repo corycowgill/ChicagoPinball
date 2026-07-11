@@ -185,4 +185,22 @@ export class Sound {
   bossFail() {
     [196, 175, 147, 110].forEach((f, i) => this.tone(f, 320, { type: 'sawtooth', vol: 0.28, delayMs: i * 240 }));
   }
+
+  nudge() {
+    this.noise(70, { vol: 0.4, freq: 240, q: 0.7 });
+  }
+
+  tilt() {
+    this.tone(220, 500, { type: 'sawtooth', vol: 0.35, slideTo: 210 });
+    this.tone(233, 500, { type: 'sawtooth', vol: 0.35 });
+  }
+
+  tourStop() {
+    this.tone(587, 120, { vol: 0.3 });
+    this.tone(880, 200, { vol: 0.3, delayMs: 110 });
+  }
+
+  tourComplete() {
+    [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone(f, 220, { vol: 0.28, delayMs: i * 100 }));
+  }
 }

@@ -439,16 +439,17 @@ export class Playfield {
     }
 
     // Ramp mouths: a ball entering with enough upward speed rides the
-    // drawn plate + habitrail all the way to the opposite inlane.
-    const rampEntry = (ramp: Ramp) => (_s: Matter.Body, o: Matter.Body) => {
+    // drawn plate + habitrail all the way to the opposite inlane. `letter`
+    // carries which ramp for shot-specific rules (City Tour stops).
+    const rampEntry = (ramp: Ramp, side: 'L' | 'R') => (_s: Matter.Body, o: Matter.Body) => {
       if (o.label !== 'ball') return;
       if (!ramp.canMake(o)) return;
       ramp.flashNow();
-      this.events.onScore({ kind: 'ramp', points: POINTS.RAMP });
+      this.events.onScore({ kind: 'ramp', points: POINTS.RAMP, letter: side });
       this.physics.defer(() => this.startTransit(o, ramp.fullPath, 12, ramp.exitVel));
     };
-    physics.on('left-ramp-entry', rampEntry(this.leftRamp));
-    physics.on('right-ramp-entry', rampEntry(this.rightRamp));
+    physics.on('left-ramp-entry', rampEntry(this.leftRamp, 'L'));
+    physics.on('right-ramp-entry', rampEntry(this.rightRamp, 'R'));
 
     physics.on('captive-ball', (_s, o) => {
       if (o.label !== 'ball') return;
@@ -487,7 +488,7 @@ export class Playfield {
       if (this.clockMs - last < 1200) return;
       if (side === 'left') this.lastLeftLoopAt = this.clockMs;
       else this.lastRightLoopAt = this.clockMs;
-      this.events.onScore({ kind: 'loop', points: POINTS.LOOP });
+      this.events.onScore({ kind: 'loop', points: POINTS.LOOP, letter: side === 'left' ? 'L' : 'R' });
     };
     physics.on('left-loop', loopHandler('left'));
     physics.on('right-loop', loopHandler('right'));
@@ -726,6 +727,17 @@ export class Playfield {
   setFlippers(left: boolean, right: boolean) {
     this.leftFlipper.setActive(left);
     this.rightFlipper.setActive(right);
+  }
+
+  /** Nudge: shove every live ball. `dir` −1 = from the left (push right),
+   *  +1 = from the right (push left). Physical feel, tilt policing is the
+   *  Game's job. */
+  nudge(dir: -1 | 1) {
+    for (const b of this.balls) {
+      if ((b.body as unknown as { $transit?: boolean }).$transit) continue;
+      const v = Matter.Body.getVelocity(b.body);
+      Matter.Body.setVelocity(b.body, { x: v.x + dir * -2.4, y: v.y - 2.2 });
+    }
   }
 
   /** Classic lane change: flipper buttons rotate which top lanes are lit. */
