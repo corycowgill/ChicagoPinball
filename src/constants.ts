@@ -63,6 +63,12 @@ export const MAX_BONUS_X = 5;
 // COMBO × chain length on top.
 export const COMBO_WINDOW_MS = 4000;
 
+// CAPONE SHOWDOWN boss battle: lit by spelling CHICAGO or reaching
+// multiball, started at the MODE scoop. Two-ball, timed; shots deal
+// damage; deplete the health bar to win.
+export const BOSS_HP = 60;
+export const BOSS_MS = 45000;
+
 export const CHICAGO = ['C', 'H', 'I', 'C', 'A', 'G', 'O'] as const;
 
 export const POINTS = {
@@ -84,6 +90,7 @@ export const POINTS = {
   LANE: 2000,
   COMBO: 1500,
   LOOP: 3000,
+  BOSS_DEFEAT: 250000,
 };
 
 // ── Palette ────────────────────────────────────────────────────────────────

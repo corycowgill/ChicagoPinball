@@ -15,6 +15,8 @@ import {
   BONUS_UNIT,
   MAX_BONUS_X,
   COMBO_WINDOW_MS,
+  BOSS_HP,
+  BOSS_MS,
 } from './constants';
 
 const HIGH_SCORE_KEY = 'chicago-pinball-high-score';
@@ -33,6 +35,19 @@ const BONUS_UNITS: Partial<Record<ScoreEvent['kind'], number>> = {
   lock: 5,
   lane: 1,
   'skill-shot': 2,
+};
+
+/** Damage each scoring event deals to Capone during the SHOWDOWN. */
+const BOSS_DAMAGE: Partial<Record<ScoreEvent['kind'], number>> = {
+  bean: 6,
+  ramp: 10,
+  loop: 10,
+  scoop: 10,
+  'lake-bonus': 8,
+  captive: 8,
+  'drop-target': 2,
+  standup: 2,
+  'pop-bumper': 1,
 };
 
 export class Game {
@@ -60,6 +75,14 @@ export class Game {
   private comboCount = 0;
   private lastComboAt = -1e9;
   private timeMs = 0;
+
+  // CAPONE SHOWDOWN (boss battle)
+  private bossLit = false;
+  private bossActive = false;
+  private bossHp = BOSS_HP;
+  private bossMsLeft = 0;
+  private spelledChicago = false;
+  private hadMultiball = false;
 
   constructor(private ctx: CanvasRenderingContext2D, canvas?: HTMLElement) {
     this.rebuildWorld();
@@ -130,6 +153,17 @@ export class Game {
       this.renderer.pushToast('JACKPOT +' + POINTS.MULTIBALL_JACKPOT.toLocaleString(), COLOR.NEON_AMBER, 900);
       this.sound.jackpot();
     }
+
+    // Boss battle: every hit chips at Capone.
+    if (this.bossActive) {
+      const dmg = BOSS_DAMAGE[e.kind] ?? 0;
+      if (dmg > 0) {
+        this.bossHp = Math.max(0, this.bossHp - dmg);
+        this.renderer.kick(1.5);
+        this.sound.bossHit();
+        if (this.bossHp <= 0) this.bossDefeat();
+      }
+    }
     this.score += pts;
 
     switch (e.kind) {
@@ -138,6 +172,8 @@ export class Game {
         this.renderer.triggerJackpotFlash();
         this.renderer.kick(5);
         this.sound.jackpot();
+        this.spelledChicago = true;
+        this.maybeLightBoss();
         break;
       case 'skill-shot':
         this.renderer.pushToast(`SKILL SHOT +${e.points.toLocaleString()}`, COLOR.NEON_AMBER, 1200);
@@ -155,7 +191,8 @@ export class Game {
         this.sound.ramp();
         break;
       case 'scoop':
-        this.renderer.pushToast('CITY TOUR MODE', COLOR.INSERT_AMBER, 1100);
+        if (this.bossActive) this.renderer.pushToast('DIRECT HIT!', COLOR.INSERT_RED, 900);
+        else if (!this.bossLit) this.renderer.pushToast('CITY TOUR MODE', COLOR.INSERT_AMBER, 1100);
         this.sound.scoop();
         break;
       case 'lake-bonus':
@@ -206,9 +243,58 @@ export class Game {
     return kind === 'ramp' || kind === 'loop' || kind === 'scoop';
   }
 
+  /** MODE scoop routing: boss fight if SHOWDOWN is lit, City Tour otherwise. */
   private startMode() {
+    if (this.bossActive) return; // scoop hits during the fight just deal damage
+    if (this.bossLit) {
+      this.startBoss();
+      return;
+    }
     this.modeMsLeft = MODE_MS;
     this.renderer.pushToast('CITY TOUR MODE', COLOR.INSERT_CYAN, 1400);
+  }
+
+  private maybeLightBoss() {
+    if (this.bossActive || this.bossLit) return;
+    if (!this.spelledChicago && !this.hadMultiball) return;
+    this.bossLit = true;
+    this.renderer.pushToast('SHOWDOWN LIT AT THE SCOOP', COLOR.INSERT_RED, 1800);
+    this.sound.lock();
+  }
+
+  private startBoss() {
+    this.bossLit = false;
+    this.bossActive = true;
+    this.bossHp = BOSS_HP;
+    this.bossMsLeft = BOSS_MS;
+    this.modeMsLeft = 0;
+    // Two-ball brawl: serve a second ball.
+    this.playfield.serveBall(true);
+    this.renderer.pushToast('CAPONE SHOWDOWN!', COLOR.INSERT_RED, 2000);
+    this.renderer.triggerJackpotFlash();
+    this.renderer.kick(4);
+    this.sound.bossStart();
+  }
+
+  private bossDefeat() {
+    this.bossActive = false;
+    this.spelledChicago = false;
+    this.hadMultiball = false;
+    this.score += POINTS.BOSS_DEFEAT;
+    this.ballSaveMs = 10000; // victory lap
+    this.renderer.pushToast('CAPONE DEFEATED!', COLOR.NEON_AMBER, 2200);
+    this.renderer.pushToast(`+${POINTS.BOSS_DEFEAT.toLocaleString()}`, COLOR.NEON_AMBER, 2200);
+    this.renderer.triggerJackpotFlash();
+    this.renderer.kick(6);
+    this.sound.bossDefeat();
+  }
+
+  private bossFail() {
+    this.bossActive = false;
+    this.spelledChicago = false;
+    this.hadMultiball = false;
+    this.renderer.pushToast('CAPONE GOT AWAY…', COLOR.TEXT_DIM, 1600);
+    this.sound.bossFail();
   }
 
   private handleLockComplete() {
@@ -219,6 +305,8 @@ export class Game {
       this.renderer.pushToast(`MULTIBALL × ${released}`, COLOR.NEON_AMBER, 1600);
       this.renderer.triggerJackpotFlash();
       this.sound.multiball();
+      this.hadMultiball = true;
+      this.maybeLightBoss();
     } else {
       // Lock progress feedback + auto-serve a fresh ball.
       this.renderer.pushToast(`LOCK ${this.playfield.bean.locked} / 3`, COLOR.INSERT_RED, 900);
@@ -256,6 +344,11 @@ export class Game {
 
     // Ball over: pay the end-of-ball bonus, then respawn / game over.
     this.multiballActive = false;
+    if (this.bossActive) {
+      // The fight ends with the ball, but SHOWDOWN relights for a retry.
+      this.bossActive = false;
+      this.bossLit = true;
+    }
     this.sound.drain();
     this.renderer.kick(4);
     const bonus = this.bonusUnits * BONUS_UNIT * this.bonusX;
@@ -337,6 +430,10 @@ export class Game {
     if (this.state === GameState.PLAYING && this.ballSaveMs > 0) {
       this.ballSaveMs = Math.max(0, this.ballSaveMs - dtMs);
     }
+    if (this.bossActive && this.state === GameState.PLAYING) {
+      this.bossMsLeft -= dtMs;
+      if (this.bossMsLeft <= 0) this.bossFail();
+    }
 
     if (this.state === GameState.BALL_DRAINED) {
       this.respawnTimer -= dtMs;
@@ -383,6 +480,10 @@ export class Game {
       bonusX: this.bonusX,
       ballSaveMs: this.ballSaveMs,
       highScore: this.highScore,
+      bossLit: this.bossLit,
+      bossActive: this.bossActive,
+      bossHp: this.bossHp,
+      bossMsLeft: this.bossMsLeft,
     };
     this.renderer.draw(this.ctx, this.playfield, hud);
   }
@@ -397,6 +498,12 @@ export class Game {
     this.bonusX = 1;
     this.comboCount = 0;
     this.lastComboAt = -1e9;
+    this.bossLit = false;
+    this.bossActive = false;
+    this.bossHp = BOSS_HP;
+    this.bossMsLeft = 0;
+    this.spelledChicago = false;
+    this.hadMultiball = false;
     this.rebuildWorld();
     this.state = GameState.READY;
   }
