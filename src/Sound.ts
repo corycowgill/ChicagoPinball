@@ -203,4 +203,15 @@ export class Sound {
   tourComplete() {
     [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone(f, 220, { vol: 0.28, delayMs: i * 100 }));
   }
+
+  kickback() {
+    this.noise(140, { vol: 0.45, freq: 700, q: 0.6 });
+    this.tone(180, 240, { type: 'sawtooth', vol: 0.25, slideTo: 880 });
+  }
+
+  mystery() {
+    // Little question-mark twinkle then the reveal note.
+    [784, 988, 784, 988].forEach((f, i) => this.tone(f, 90, { type: 'triangle', vol: 0.22, delayMs: i * 80 }));
+    this.tone(1319, 260, { vol: 0.3, delayMs: 360 });
+  }
 }

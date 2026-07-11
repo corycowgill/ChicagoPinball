@@ -33,6 +33,9 @@ export interface PlayfieldEvents {
   onScoopMode: () => void;
   /** All three top lanes lit (they reset immediately) — advance bonus X. */
   onLanesComplete: () => void;
+  /** Ball entered the LEFT outlane just above the drain — the Game decides
+   *  whether the kickback is lit and fires it via fireKickback(). */
+  onLeftOutlane: (ball: Matter.Body) => void;
 }
 
 interface Pt {
@@ -113,6 +116,10 @@ export class Playfield {
   private lastCaptiveScoreAt = -1000;
   private lastLeftLoopAt = -1000;
   private lastRightLoopAt = -1000;
+  private lastKickbackAt = -1000;
+
+  /** Kickback kicker position (left outlane, drawn by the Renderer). */
+  readonly kickbackPos = { x: 21, y: 884 };
   /** True from launch until the first top-lane pass — that pass is the
    *  skill shot; later passes just score/light the lane. */
   private skillShotArmed = false;
@@ -298,6 +305,14 @@ export class Playfield {
     this.spinner = new Spinner(63, 678, 34);
     physics.add(this.spinner.body, this.spinner.pivot, this.spinner.stop);
 
+    // ── KICKBACK sensor — left outlane, just above the drain. ──
+    const kickbackSensor = Matter.Bodies.rectangle(this.kickbackPos.x, this.kickbackPos.y, 38, 10, {
+      isStatic: true,
+      isSensor: true,
+      label: 'left-outlane',
+    });
+    physics.add(kickbackSensor);
+
     // ── LOOP SENSORS — the edge channels are shootable lanes: a ball sent
     //    up along either wall slides the channel, crosses behind the top
     //    lanes, and falls down the far side. The sensor pays the shot. ──
@@ -434,7 +449,9 @@ export class Playfield {
       physics.on(s.label, (_self, o) => {
         if (o.label !== 'ball') return;
         s.hit();
-        this.events.onScore({ kind: 'standup', points: POINTS.STANDUP });
+        // letter carries the team id ("standup-cubs" → "cubs") for the
+        // pair-completion awards.
+        this.events.onScore({ kind: 'standup', points: POINTS.STANDUP, letter: s.label.slice(8) });
       });
     }
 
@@ -495,6 +512,14 @@ export class Playfield {
 
     physics.on('drain', (_s, o) => {
       if (o.label === 'ball') this.events.onDrain(o);
+    });
+
+    // Left outlane, just above the drain — kickback territory.
+    physics.on('left-outlane', (_s, o) => {
+      if (o.label !== 'ball') return;
+      if (Matter.Body.getVelocity(o).y <= 0) return; // falling balls only
+      if (this.clockMs - this.lastKickbackAt < 800) return;
+      this.events.onLeftOutlane(o);
     });
 
     // Shooter-lane exit: the launched ball rides the visible wireform over
@@ -727,6 +752,16 @@ export class Playfield {
   setFlippers(left: boolean, right: boolean) {
     this.leftFlipper.setActive(left);
     this.rightFlipper.setActive(right);
+  }
+
+  /** Fire the kickback: rocket the ball back up the left outlane channel. */
+  fireKickback(ball: Matter.Body) {
+    this.lastKickbackAt = this.clockMs;
+    this.physics.defer(() => {
+      Matter.Body.setPosition(ball, { x: this.kickbackPos.x, y: this.kickbackPos.y - 6 });
+      Matter.Body.setVelocity(ball, { x: 0.6, y: -21 });
+      Matter.Body.setAngularVelocity(ball, 0);
+    });
   }
 
   /** Nudge: shove every live ball. `dir` −1 = from the left (push right),

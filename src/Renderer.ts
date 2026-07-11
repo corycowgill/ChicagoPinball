@@ -37,6 +37,8 @@ export interface HudInfo {
   tourMsLeft: number;
   tiltHeat: number;
   tilted: boolean;
+  kickbackLit: boolean;
+  mysteryLit: boolean;
   bonusX: number;
   ballSaveMs: number;
   highScore: number;
@@ -163,6 +165,41 @@ export class Renderer {
         ctx.arc(x, 590, 16, 0, Math.PI * 2);
         ctx.stroke();
       }
+      ctx.restore();
+    }
+
+    // Kickback lamp in the left outlane.
+    {
+      const kp = pf.kickbackPos;
+      ctx.save();
+      const on = hud.kickbackLit && Math.sin(performance.now() / 200) > -0.6;
+      ctx.shadowColor = COLOR.NEON_GREEN;
+      ctx.shadowBlur = on ? 14 : 0;
+      ctx.fillStyle = on ? COLOR.NEON_GREEN : 'rgba(92, 255, 154, 0.14)';
+      ctx.beginPath();
+      ctx.arc(kp.x, kp.y - 4, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      // Kicker body.
+      ctx.fillStyle = '#1a2236';
+      ctx.fillRect(kp.x - 12, kp.y + 4, 24, 7);
+      ctx.strokeStyle = COLOR.METAL_MID;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(kp.x - 12, kp.y + 4, 24, 7);
+      ctx.restore();
+    }
+
+    // Mystery "?" over the LAKE scoop while lit.
+    if (hud.mysteryLit && state === GameState.PLAYING) {
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const pulse = 0.6 + 0.4 * Math.sin(performance.now() / 250);
+      ctx.shadowColor = COLOR.RIVER_HI;
+      ctx.shadowBlur = 12 * pulse;
+      ctx.fillStyle = `rgba(180, 230, 255, ${0.55 + 0.4 * pulse})`;
+      ctx.font = 'bold 16px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText('?', pf.lakeMichiganScoop.x, pf.lakeMichiganScoop.y - 44);
       ctx.restore();
     }
 

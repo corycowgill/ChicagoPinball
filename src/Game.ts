@@ -90,6 +90,10 @@ export class Game {
   private tiltHeat = 0;
   private tilted = false;
 
+  // Kickback (left outlane) + Mystery (LAKE scoop)
+  private kickbackLit = false;
+  private mysteryLit = true;
+
   // Per-ball progression
   private ballSaveMs = 0;
   private bonusUnits = 0;
@@ -134,7 +138,57 @@ export class Game {
       onLockComplete: () => this.handleLockComplete(),
       onScoopMode: () => this.startMode(),
       onLanesComplete: () => this.advanceBonusX(),
+      onLeftOutlane: (ball) => this.handleLeftOutlane(ball),
     });
+  }
+
+  private handleLeftOutlane(ball: Matter.Body) {
+    if (this.state !== GameState.PLAYING || this.tilted || !this.kickbackLit) return;
+    this.kickbackLit = false; // one shot per light
+    this.playfield.fireKickback(ball);
+    this.renderer.pushToast('KICKBACK!', COLOR.NEON_GREEN, 1100);
+    this.renderer.kick(3);
+    this.sound.kickback();
+  }
+
+  /** The Mystery wheel behind the LAKE scoop. */
+  private awardMystery() {
+    this.sound.mystery();
+    const options: Array<() => void> = [
+      () => {
+        this.score += 25000;
+        this.renderer.pushToast('MYSTERY: 25,000', COLOR.NEON_AMBER, 1500);
+      },
+      () => {
+        this.advanceBonusX();
+        this.renderer.pushToast('MYSTERY: BONUS ADVANCED', COLOR.NEON_GREEN, 1500);
+      },
+      () => {
+        this.ballSaveMs = Math.max(this.ballSaveMs, 10000);
+        this.renderer.pushToast('MYSTERY: BALL SAVE', COLOR.NEON_GREEN, 1500);
+      },
+      () => {
+        if (!this.kickbackLit) {
+          this.kickbackLit = true;
+          this.renderer.pushToast('MYSTERY: KICKBACK LIT', COLOR.NEON_GREEN, 1500);
+        } else {
+          this.score += 15000;
+          this.renderer.pushToast('MYSTERY: 15,000', COLOR.NEON_AMBER, 1500);
+        }
+      },
+      () => {
+        if (this.tourIdx >= 0) {
+          // Spot the current stop.
+          const stop = TOUR_STOPS[this.tourIdx];
+          this.handleScore({ kind: stop.kind, points: 0, letter: stop.letter });
+          this.renderer.pushToast('MYSTERY: STOP SPOTTED', COLOR.INSERT_CYAN, 1500);
+        } else {
+          this.score += 10000;
+          this.renderer.pushToast('MYSTERY: 10,000', COLOR.NEON_AMBER, 1500);
+        }
+      },
+    ];
+    options[Math.floor(Math.random() * options.length)]();
   }
 
   private advanceBonusX() {
@@ -234,8 +288,13 @@ export class Game {
         this.sound.scoop();
         break;
       case 'lake-bonus':
-        this.renderer.pushToast('LAKE BONUS', COLOR.RIVER_HI, 900);
-        this.sound.scoop();
+        if (this.mysteryLit) {
+          this.mysteryLit = false;
+          this.awardMystery();
+        } else {
+          this.renderer.pushToast('LAKE BONUS', COLOR.RIVER_HI, 900);
+          this.sound.scoop();
+        }
         break;
       case 'lock':
         this.renderer.pushToast('BALL LOCKED', COLOR.INSERT_RED, 900);
@@ -262,9 +321,33 @@ export class Game {
         this.renderer.kick(2.5);
         this.sound.sling();
         break;
-      case 'standup':
+      case 'standup': {
         this.sound.standup();
+        // Team pairs: CUBS+BEARS light the kickback, BULLS+SOX relight Mystery.
+        const target = this.playfield.standups.find((s) => s.label === `standup-${e.letter}`);
+        if (target) target.lit = true;
+        const litOf = (id: string) =>
+          this.playfield.standups.find((s) => s.label === `standup-${id}`)?.lit ?? false;
+        const unlight = (ids: string[]) => {
+          for (const id of ids) {
+            const s = this.playfield.standups.find((t) => t.label === `standup-${id}`);
+            if (s) s.lit = false;
+          }
+        };
+        if (litOf('cubs') && litOf('bears') && !this.kickbackLit) {
+          unlight(['cubs', 'bears']);
+          this.kickbackLit = true;
+          this.renderer.pushToast('KICKBACK LIT', COLOR.NEON_GREEN, 1300);
+          this.sound.rollover();
+        }
+        if (litOf('bulls') && litOf('sox') && !this.mysteryLit) {
+          unlight(['bulls', 'sox']);
+          this.mysteryLit = true;
+          this.renderer.pushToast('MYSTERY LIT AT THE LAKE', COLOR.RIVER_HI, 1300);
+          this.sound.rollover();
+        }
         break;
+      }
       case 'spinner':
         this.sound.spinner();
         break;
@@ -523,6 +606,9 @@ export class Game {
     this.tourIdx = -1;
     this.tiltHeat = 0;
     this.tilted = false;
+    this.kickbackLit = false;
+    this.mysteryLit = true; // one free Mystery per ball
+    for (const s of this.playfield.standups) s.lit = false;
     this.state = GameState.READY;
   }
 
@@ -549,6 +635,8 @@ export class Game {
       tourMsLeft: this.tourMsLeft,
       tiltHeat: this.tiltHeat,
       tilted: this.tilted,
+      kickbackLit: this.kickbackLit,
+      mysteryLit: this.mysteryLit,
       bonusX: this.bonusX,
       ballSaveMs: this.ballSaveMs,
       highScore: this.highScore,
@@ -566,6 +654,8 @@ export class Game {
     this.tourIdx = -1;
     this.tiltHeat = 0;
     this.tilted = false;
+    this.kickbackLit = false;
+    this.mysteryLit = true;
     this.multiballActive = false;
     this.ballSaveMs = 0;
     this.bonusUnits = 0;
