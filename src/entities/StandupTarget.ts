@@ -12,6 +12,8 @@ export class StandupTarget {
   readonly angle: number;
   readonly color: string;
   readonly label: string;
+  /** Held lit once hit, until the team pair's award is collected. */
+  lit = false;
   private flash = 0;
 
   constructor(opts: {
@@ -63,13 +65,14 @@ export class StandupTarget {
     ctx.lineWidth = 1;
     ctx.strokeRect(-this.w / 2 - 2, -this.h / 2 - 2, this.w + 4, this.h + 4);
 
-    // Lit plastic face
+    // Plastic face — held bright while lit (pair progress), dimmer when not.
+    const glow = this.lit ? 18 : 8;
     ctx.shadowColor = this.color;
-    ctx.shadowBlur = 12 + 16 * this.flash;
+    ctx.shadowBlur = glow + 16 * this.flash;
     const grad = ctx.createLinearGradient(0, -this.h / 2, 0, this.h / 2);
-    grad.addColorStop(0, '#ffffff');
-    grad.addColorStop(0.55, this.color);
-    grad.addColorStop(1, dimRgba(this.color, 0.55));
+    grad.addColorStop(0, this.lit ? '#ffffff' : dimRgba(this.color, 0.8));
+    grad.addColorStop(0.55, this.lit ? this.color : dimRgba(this.color, 0.55));
+    grad.addColorStop(1, dimRgba(this.color, this.lit ? 0.7 : 0.3));
     ctx.fillStyle = grad;
     ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
 
