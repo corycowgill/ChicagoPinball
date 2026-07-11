@@ -70,7 +70,8 @@ export class Bean {
     if (this.flash > 0) this.flash = Math.max(0, this.flash - dtMs / 280);
   }
 
-  draw(ctx: CanvasRenderingContext2D) {
+  /** `boss` dresses the dome as Capone's hideout during the SHOWDOWN. */
+  draw(ctx: CanvasRenderingContext2D, boss = false) {
     const r = this.radius;
     const x = this.cx;
     const y = this.cy;
@@ -142,9 +143,38 @@ export class Bean {
 
     ctx.restore();
 
-    // (The saucer-style lock entrance was removed when the lock mechanic
-    // switched from sensor-entry to every-Nth-bean-hit — drawing a hole
-    // here was misleading, suggesting a target that doesn't exist.)
+    if (boss) {
+      // Capone's fedora perched on the dome + red hat band.
+      ctx.save();
+      const hatY = y - r + 2;
+      ctx.fillStyle = '#14161c';
+      // Brim
+      ctx.beginPath();
+      ctx.ellipse(x, hatY, r * 0.95, r * 0.3, -0.08, 0, Math.PI * 2);
+      ctx.fill();
+      // Crown
+      ctx.beginPath();
+      ctx.moveTo(x - r * 0.55, hatY - 2);
+      ctx.quadraticCurveTo(x - r * 0.5, hatY - r * 0.85, x - r * 0.15, hatY - r * 0.9);
+      ctx.quadraticCurveTo(x + r * 0.45, hatY - r * 0.95, x + r * 0.55, hatY - 4);
+      ctx.closePath();
+      ctx.fill();
+      // Band
+      ctx.fillStyle = '#a01522';
+      ctx.fillRect(x - r * 0.52, hatY - r * 0.34, r * 1.06, r * 0.2);
+      ctx.restore();
+
+      // Name plate.
+      ctx.save();
+      ctx.font = 'bold 10px "Helvetica Neue", Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = COLOR.INSERT_RED;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText('CAPONE', x, y - r - 20);
+      ctx.restore();
+      return;
+    }
 
     // Lock indicator lights — three dots above the bean (LOCK 1 / 2 / 3).
     ctx.save();

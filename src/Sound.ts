@@ -164,4 +164,25 @@ export class Sound {
   gameOver() {
     [392, 330, 262, 196].forEach((f, i) => this.tone(f, 300, { type: 'triangle', vol: 0.3, delayMs: i * 220 }));
   }
+
+  bossStart() {
+    // Menacing low walk-up.
+    [110, 131, 147, 110].forEach((f, i) => this.tone(f, 260, { type: 'sawtooth', vol: 0.3, delayMs: i * 200 }));
+    this.noise(500, { vol: 0.2, freq: 220, q: 0.6, delayMs: 700 });
+  }
+
+  bossHit() {
+    this.tone(98, 90, { type: 'square', vol: 0.32, slideTo: 65 });
+    this.noise(50, { vol: 0.3, freq: 900 });
+  }
+
+  bossDefeat() {
+    const notes = [523, 659, 784, 1047, 1319, 1568];
+    notes.forEach((f, i) => this.tone(f, 260, { vol: 0.28, delayMs: i * 110 }));
+    this.noise(600, { vol: 0.25, freq: 3000, q: 0.4, delayMs: 660 });
+  }
+
+  bossFail() {
+    [196, 175, 147, 110].forEach((f, i) => this.tone(f, 320, { type: 'sawtooth', vol: 0.28, delayMs: i * 240 }));
+  }
 }

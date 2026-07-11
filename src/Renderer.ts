@@ -1,4 +1,4 @@
-import { COLOR, PLAYFIELD_W, PLAYFIELD_H, CHICAGO } from './constants';
+import { COLOR, PLAYFIELD_W, PLAYFIELD_H, CHICAGO, BOSS_HP } from './constants';
 import { Playfield, PLAYFIELD_TOP } from './scene/Playfield';
 import { GameState } from './types';
 import { metalPost, strokeMetalPath, insertArrow } from './Graphics';
@@ -35,6 +35,10 @@ export interface HudInfo {
   bonusX: number;
   ballSaveMs: number;
   highScore: number;
+  bossLit: boolean;
+  bossActive: boolean;
+  bossHp: number;
+  bossMsLeft: number;
 }
 
 export class Renderer {
@@ -91,7 +95,7 @@ export class Renderer {
 
   draw(ctx: CanvasRenderingContext2D, pf: Playfield, hud: HudInfo) {
     const { state, score } = hud;
-    const hot = hud.multiball || hud.modeMsLeft > 0;
+    const hot = hud.multiball || hud.modeMsLeft > 0 || hud.bossActive;
     this.ensureStaticLayers(pf);
     ctx.save();
     if (this.shakeMs > 0 && this.shakeAmp > 0) {
@@ -117,7 +121,7 @@ export class Renderer {
     pf.lakeMichiganScoop.draw(ctx);
     for (const r of pf.rollovers) r.draw(ctx);
     for (const s of pf.standups) s.draw(ctx);
-    pf.bean.draw(ctx);
+    pf.bean.draw(ctx, hud.bossActive);
     for (const p of pf.popBumpers) p.draw(ctx);
     for (const s of pf.slingshots) s.draw(ctx);
     pf.leftFlipper.draw(ctx);
@@ -125,6 +129,23 @@ export class Renderer {
     pf.plunger.draw(ctx);
     // Static over-layer: decals, labels, walls, posts, loop arrows.
     if (this.staticOver) ctx.drawImage(this.staticOver, 0, 0, PLAYFIELD_W, PLAYFIELD_H);
+    // SHOWDOWN marker over the MODE scoop while the boss is lit.
+    if (hud.bossLit && state === GameState.PLAYING && Math.sin(performance.now() / 160) > -0.3) {
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.shadowColor = COLOR.INSERT_RED;
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 10px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText('SHOWDOWN', pf.cityTourScoop.x, pf.cityTourScoop.y - 46);
+      ctx.strokeStyle = COLOR.INSERT_RED;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(pf.cityTourScoop.x, pf.cityTourScoop.y, 22, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Loop arrows pulse while their shot pays extra.
     if (hot && Math.sin(performance.now() / 120) > 0) {
       ctx.save();
@@ -508,11 +529,36 @@ export class Renderer {
     const ballNum = Math.min(3, Math.max(1, 3 - ballsRemaining + 1));
     ctx.fillText(`BALL ${ballNum} / 3`, PLAYFIELD_W - 12, HUD_TOP + 40);
 
-    // Status pill — multiball or mode timer (centered upper)
-    if (multiballActive) {
+    // Status area — boss health bar beats everything else for the slot.
+    if (hud.bossActive) {
+      const barW = 170;
+      const barH = 12;
+      const bx = PLAYFIELD_W / 2 - barW / 2;
+      const by = HUD_TOP + 10;
+      ctx.save();
+      ctx.fillStyle = 'rgba(40, 8, 12, 0.9)';
+      ctx.fillRect(bx - 2, by - 2, barW + 4, barH + 4);
+      const frac = Math.max(0, hud.bossHp) / BOSS_HP;
+      ctx.shadowColor = COLOR.INSERT_RED;
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = COLOR.INSERT_RED;
+      ctx.fillRect(bx, by, barW * frac, barH);
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx - 2, by - 2, barW + 4, barH + 4);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 9px "Helvetica Neue", Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`CAPONE  ·  ${Math.ceil(hud.bossMsLeft / 1000)}s`, PLAYFIELD_W / 2, by + barH + 9);
+      ctx.restore();
+    } else if (multiballActive) {
       this.statusPill(ctx, 'MULTIBALL', COLOR.NEON_AMBER, PLAYFIELD_W / 2, HUD_TOP + 16);
     } else if (modeMsLeft > 0) {
       this.statusPill(ctx, `MODE ${(modeMsLeft / 1000).toFixed(0)}s`, COLOR.INSERT_CYAN, PLAYFIELD_W / 2, HUD_TOP + 16);
+    } else if (hud.bossLit) {
+      this.statusPill(ctx, 'SHOWDOWN LIT', COLOR.INSERT_RED, PLAYFIELD_W / 2, HUD_TOP + 16);
     }
 
     // CHICAGO progress strip (bottom of HUD)
