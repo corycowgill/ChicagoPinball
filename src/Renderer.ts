@@ -213,10 +213,25 @@ export class Renderer {
     this.staticOver = over.c;
   }
 
-  /** Painted playfield art: Chicago-flag band with the four red stars,
-   *  a faint street grid, GI light pools, and the Bean's plaza ring. */
+  /** Painted playfield art — Chicago-flag decal, skyline silhouette,
+   *  art-deco sunburst, lakefront water, street names, insert rings. All
+   *  of this renders once into the cached static layer. */
   private drawFloorArt(ctx: CanvasRenderingContext2D, pf: Playfield) {
     ctx.save();
+    let seed = 7;
+    const rand = () => {
+      seed = (seed * 9301 + 49297) % 233280;
+      return seed / 233280;
+    };
+
+    // Warm centre light — the playfield feels lit from the backbox.
+    {
+      const g = ctx.createRadialGradient(pf.playCenter, 520, 40, pf.playCenter, 520, 400);
+      g.addColorStop(0, 'rgba(255, 220, 160, 0.05)');
+      g.addColorStop(1, 'rgba(255, 220, 160, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, PLAYFIELD_TOP, pf.playRight, PLAYFIELD_H - PLAYFIELD_TOP);
+    }
 
     // Street grid — faint avenues over the whole playfield.
     ctx.strokeStyle = 'rgba(120, 160, 220, 0.05)';
@@ -227,16 +242,147 @@ export class Renderer {
       ctx.lineTo(x, PLAYFIELD_H - 40);
       ctx.stroke();
     }
+    // Street-name decals along a couple of avenues.
+    ctx.save();
+    ctx.fillStyle = 'rgba(170, 200, 240, 0.14)';
+    ctx.font = 'bold 9px "Helvetica Neue", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    for (const s of [
+      { x: 120, y: 620, text: 'LAKE SHORE DR' },
+      { x: 300, y: 548, text: 'STATE ST' },
+    ]) {
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText(s.text, 0, 3);
+      ctx.restore();
+    }
+    ctx.restore();
 
-    // Chicago-flag band across the open strip between the ramp funnels and
-    // the slingshots: pale-blue stripe with four red six-pointed stars.
-    const bandY = 592;
-    ctx.fillStyle = 'rgba(120, 190, 235, 0.10)';
-    ctx.fillRect(60, bandY, pf.playRight - 120, 28);
-    ctx.fillStyle = 'rgba(255, 60, 70, 0.5)';
-    for (let i = 0; i < 4; i++) {
-      const sx = pf.playCenter - 72 + i * 48;
-      drawStar6(ctx, sx, bandY + 14, 8);
+    // Art-deco sunburst fanning up from behind the Bean / bumper nest.
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 205, 120, 0.045)';
+    const bx = pf.bean.cx;
+    const by = 372;
+    for (let i = 0; i < 9; i++) {
+      const a0 = Math.PI + (i / 9) * Math.PI + 0.02;
+      const a1 = Math.PI + ((i + 0.55) / 9) * Math.PI;
+      ctx.beginPath();
+      ctx.moveTo(bx, by);
+      ctx.arc(bx, by, 215, a0, a1);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // Lakefront — a water body hugging the left shoreline around the LAKE
+    // scoop, with static wave arcs.
+    {
+      const cx = pf.lakeMichiganScoop.x;
+      const cy = pf.lakeMichiganScoop.y;
+      ctx.save();
+      const g = ctx.createLinearGradient(0, cy - 90, 0, cy + 90);
+      g.addColorStop(0, 'rgba(48, 120, 180, 0.16)');
+      g.addColorStop(0.5, 'rgba(60, 150, 210, 0.24)');
+      g.addColorStop(1, 'rgba(30, 80, 140, 0.12)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(34, cy - 96);
+      ctx.bezierCurveTo(96, cy - 88, 132, cy - 40, 126, cy);
+      ctx.bezierCurveTo(120, cy + 52, 92, cy + 78, 40, cy + 92);
+      ctx.lineTo(30, cy + 92);
+      ctx.bezierCurveTo(24, cy + 40, 24, cy - 40, 34, cy - 96);
+      ctx.closePath();
+      ctx.fill();
+      // Shoreline edge.
+      ctx.strokeStyle = 'rgba(140, 205, 245, 0.22)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Static wave dashes.
+      ctx.strokeStyle = 'rgba(150, 205, 240, 0.18)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 7; i++) {
+        const wy = cy - 62 + i * 20;
+        const wx = 52 + rand() * 30;
+        ctx.beginPath();
+        ctx.arc(wx, wy, 8, Math.PI * 1.15, Math.PI * 1.85);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Skyline silhouette across the strip above the slingshots — the city
+    // seen from the lake, with sparse lit windows and a sky-glow roofline.
+    {
+      const baseY = 704;
+      ctx.save();
+      let x = 8;
+      const roof: { x: number; w: number; h: number }[] = [];
+      while (x < pf.playRight - 12) {
+        const w = 18 + rand() * 26;
+        const h = 16 + rand() * 34; // stays below the flag decal
+        roof.push({ x, w: Math.min(w, pf.playRight - 12 - x), h });
+        x += w + 2;
+      }
+      // Sky glow behind the roofline.
+      ctx.fillStyle = 'rgba(120, 170, 255, 0.04)';
+      ctx.fillRect(8, baseY - 56, pf.playRight - 16, 56);
+      // Buildings.
+      for (const b of roof) {
+        ctx.fillStyle = 'rgba(4, 8, 18, 0.7)';
+        ctx.fillRect(b.x, baseY - b.h, b.w, b.h);
+        ctx.strokeStyle = 'rgba(140, 180, 240, 0.07)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(b.x, baseY - b.h, b.w, b.h);
+        // Windows.
+        ctx.fillStyle = 'rgba(255, 214, 130, 0.32)';
+        for (let wy = baseY - b.h + 5; wy < baseY - 6; wy += 8) {
+          for (let wx = b.x + 4; wx < b.x + b.w - 3; wx += 7) {
+            if (rand() < 0.28) ctx.fillRect(wx, wy, 1.6, 2.4);
+          }
+        }
+      }
+      ctx.restore();
+    }
+
+    // Chicago-flag decal — white field, two light-blue stripes, the four
+    // red six-pointed stars between them.
+    {
+      // Compact banner centred on the stars, not a full-width bar.
+      const x0 = pf.playCenter - 110;
+      const x1 = pf.playCenter + 110;
+      const y0 = 586;
+      ctx.save();
+      ctx.fillStyle = 'rgba(240, 248, 255, 0.08)';
+      ctx.fillRect(x0, y0, x1 - x0, 38);
+      ctx.fillStyle = 'rgba(120, 205, 235, 0.30)';
+      ctx.fillRect(x0, y0 + 4, x1 - x0, 8);
+      ctx.fillRect(x0, y0 + 26, x1 - x0, 8);
+      ctx.fillStyle = 'rgba(235, 40, 55, 0.75)';
+      for (let i = 0; i < 4; i++) {
+        drawStar6(ctx, pf.playCenter - 72 + i * 48, y0 + 19, 7.5);
+      }
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x0, y0, x1 - x0, 38);
+      ctx.restore();
+    }
+
+    // Scoop surround — painted insert rings around the MODE kickout hole.
+    {
+      const sx = pf.cityTourScoop.x;
+      const sy = pf.cityTourScoop.y;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 167, 51, 0.30)';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, 26, 19, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255, 167, 51, 0.14)';
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, 32, 24, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
     }
 
     // GI light pools — warm glow around the bumper nest and the flippers.
@@ -253,7 +399,7 @@ export class Renderer {
       ctx.fill();
     }
 
-    // Cloud Gate plaza — concentric rings under the Bean.
+    // Cloud Gate plaza — concentric rings + paver ticks under the Bean.
     ctx.strokeStyle = 'rgba(180, 200, 230, 0.10)';
     ctx.lineWidth = 2;
     for (const r of [34, 44]) {
@@ -261,6 +407,25 @@ export class Renderer {
       ctx.arc(pf.bean.cx, pf.bean.cy, r, 0, Math.PI * 2);
       ctx.stroke();
     }
+    ctx.strokeStyle = 'rgba(180, 200, 230, 0.07)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(pf.bean.cx + Math.cos(a) * 46, pf.bean.cy + Math.sin(a) * 46);
+      ctx.lineTo(pf.bean.cx + Math.cos(a) * 52, pf.bean.cy + Math.sin(a) * 52);
+      ctx.stroke();
+    }
+
+    // Deco accent lines inside the top corner diagonals.
+    ctx.strokeStyle = 'rgba(63, 240, 255, 0.13)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(16, 252);
+    ctx.lineTo(152, 186);
+    ctx.moveTo(pf.playRight - 16, 252);
+    ctx.lineTo(pf.playRight - 152, 186);
+    ctx.stroke();
 
     ctx.restore();
   }
@@ -285,7 +450,7 @@ export class Renderer {
     ctx.lineTo(0, PLAYFIELD_H);
     ctx.closePath();
     ctx.fill();
-    // Chrome trim along the top edge.
+    // Chrome trim along the top edge + gold pinstripe inset.
     ctx.strokeStyle = COLOR.METAL_LIGHT;
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -294,6 +459,34 @@ export class Renderer {
     ctx.lineTo(312, topY);
     ctx.lineTo(pf.playRight, 946);
     ctx.stroke();
+    ctx.strokeStyle = 'rgba(255, 210, 120, 0.55)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(4, 951);
+    ctx.lineTo(170, topY + 5);
+    ctx.lineTo(310, topY + 5);
+    ctx.lineTo(pf.playRight - 4, 951);
+    ctx.stroke();
+
+    // Instruction cards flanking the wordmark (the little score/rule cards
+    // every real apron carries).
+    for (const cx of [72, pf.playRight - 72]) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(238, 232, 214, 0.88)';
+      ctx.strokeStyle = 'rgba(60, 40, 30, 0.8)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(cx - 24, 934, 48, 20, 3);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(90, 20, 28, 0.85)';
+      ctx.fillRect(cx - 19, 938, 38, 2.5);
+      ctx.fillStyle = 'rgba(70, 70, 80, 0.6)';
+      ctx.fillRect(cx - 19, 943, 38, 1.2);
+      ctx.fillRect(cx - 19, 946.5, 30, 1.2);
+      ctx.fillRect(cx - 19, 950, 34, 1.2);
+      ctx.restore();
+    }
 
     // Apron art: star + wordmark.
     ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
