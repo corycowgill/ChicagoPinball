@@ -49,6 +49,20 @@ export const SCOOP_HOLD_MS = 900;
 // Mode duration after starting from the scoop (ms).
 export const MODE_MS = 25000;
 
+// Ball save: a drain within this window after launch serves a fresh ball
+// instead of costing one (once per launch).
+export const BALL_SAVE_MS = 9000;
+
+// End-of-ball bonus: units collected during the ball × unit value × the
+// bonus multiplier (advanced by completing the top lanes; lane-change on
+// the flipper buttons).
+export const BONUS_UNIT = 1000;
+export const MAX_BONUS_X = 5;
+
+// Combo: chaining ramp / scoop / captive shots within this window pays
+// COMBO × chain length on top.
+export const COMBO_WINDOW_MS = 4000;
+
 export const CHICAGO = ['C', 'H', 'I', 'C', 'A', 'G', 'O'] as const;
 
 export const POINTS = {
@@ -67,6 +81,8 @@ export const POINTS = {
   MODE_SHOT: 3000,
   SKILL_SHOT_SIDE: 10000,
   SKILL_SHOT_CENTER: 25000,
+  LANE: 2000,
+  COMBO: 1500,
 };
 
 // ── Palette ────────────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ export type ScoreEventKind =
   | 'standup'
   | 'spinner'
   | 'skill-shot'
+  | 'lane'
   | 'ramp'
   | 'scoop'
   | 'lake-bonus'

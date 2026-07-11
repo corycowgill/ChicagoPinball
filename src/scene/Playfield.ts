@@ -31,6 +31,8 @@ export interface PlayfieldEvents {
   onDrain: (ball: Matter.Body) => void;
   onLockComplete: () => void;
   onScoopMode: () => void;
+  /** All three top lanes lit (they reset immediately) — advance bonus X. */
+  onLanesComplete: () => void;
 }
 
 interface Pt {
@@ -109,6 +111,9 @@ export class Playfield {
   private autoLaunchMs = 0;
   private clockMs = 0;
   private lastCaptiveScoreAt = -1000;
+  /** True from launch until the first top-lane pass — that pass is the
+   *  skill shot; later passes just score/light the lane. */
+  private skillShotArmed = false;
 
   launchRestY: number;
 
@@ -383,10 +388,20 @@ export class Playfield {
     for (const r of this.rollovers) {
       physics.on(r.label, (_s, o) => {
         if (o.label !== 'ball') return;
-        if (!r.lit) {
-          r.trigger();
+        if (r.lit) return;
+        r.trigger();
+        if (this.skillShotArmed) {
+          // First lane pass after a launch is the skill shot.
+          this.skillShotArmed = false;
           const points = r.letter === '25K' ? POINTS.SKILL_SHOT_CENTER : POINTS.SKILL_SHOT_SIDE;
           this.events.onScore({ kind: 'skill-shot', points });
+        } else {
+          this.events.onScore({ kind: 'lane', points: POINTS.LANE });
+        }
+        // Completing the set relights the lanes and advances bonus X.
+        if (this.rollovers.every((rr) => rr.lit)) {
+          for (const rr of this.rollovers) rr.reset();
+          this.events.onLanesComplete();
         }
       });
     }
@@ -453,6 +468,7 @@ export class Playfield {
       const arrivalSpeed = -v.y;
       const laneIdx = arrivalSpeed > 8 ? 0 : arrivalSpeed > 4.5 ? 1 : 2;
       const path = this.shooterPath(this.rolloverXs[laneIdx]);
+      this.skillShotArmed = true;
       this.physics.defer(() => this.startTransit(o, path, 10, { x: 0, y: 3.5 }));
     });
   }
@@ -656,6 +672,16 @@ export class Playfield {
   setFlippers(left: boolean, right: boolean) {
     this.leftFlipper.setActive(left);
     this.rightFlipper.setActive(right);
+  }
+
+  /** Classic lane change: flipper buttons rotate which top lanes are lit. */
+  rotateLanes(dir: 1 | -1) {
+    const lit = this.rollovers.map((r) => r.lit);
+    if (!lit.some(Boolean) || lit.every(Boolean)) return;
+    const n = lit.length;
+    for (let i = 0; i < n; i++) {
+      this.rollovers[i].lit = lit[(i - dir + n) % n];
+    }
   }
 
   /** Launch whichever ball is sitting in the shooter lane. `pull` is the
