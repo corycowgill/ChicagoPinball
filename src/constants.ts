@@ -83,6 +83,7 @@ export const POINTS = {
   SKILL_SHOT_CENTER: 25000,
   LANE: 2000,
   COMBO: 1500,
+  LOOP: 3000,
 };
 
 // ── Palette ────────────────────────────────────────────────────────────────
