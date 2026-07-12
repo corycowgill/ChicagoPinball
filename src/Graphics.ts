@@ -264,6 +264,30 @@ export function strokeGuideRail(
   ctx.restore();
 }
 
+/** Six-pointed Chicago-flag star, filled with the given style. */
+export function decoStar(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+  style = 'rgba(255, 255, 255, 0.55)',
+) {
+  ctx.save();
+  ctx.fillStyle = style;
+  ctx.beginPath();
+  for (let i = 0; i < 12; i++) {
+    const a = (i * Math.PI) / 6 - Math.PI / 2;
+    const rad = i % 2 === 0 ? r : r * 0.45;
+    const px = x + Math.cos(a) * rad;
+    const py = y + Math.sin(a) * rad;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
 /** Noir Capone portrait — fedora, hat-shadowed eyes, cigar, pinstripes.
  *  Drawn centred on (cx, cy) ≈ the bridge of the nose; roughly 100×170
  *  units at scale 1. */

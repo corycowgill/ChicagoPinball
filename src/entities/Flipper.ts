@@ -192,6 +192,9 @@ export class Flipper {
     // Glossy highlight stripe along the top edge of the bat.
     ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
     ctx.fillRect(-half + 8, -h / 2 + 2, FLIPPER_LEN - 18, 1.6);
+    // Brass pinstripe — matches the deco trim across the board.
+    ctx.fillStyle = 'rgba(217, 164, 65, 0.6)';
+    ctx.fillRect(-half + 8, -h / 2 + 5, FLIPPER_LEN - 22, 1);
 
     // Black rubber strip along the leading (striking) face.
     ctx.fillStyle = COLOR.FLIPPER_RUBBER;
