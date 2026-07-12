@@ -66,6 +66,13 @@ export interface HudInfo {
   bonusX: number;
   ballSaveMs: number;
   highScore: number;
+  /** Initials attached to the stored high score ('' if none yet). */
+  highScoreInitials: string;
+  /** Arcade initials entry active at game over. */
+  enteringInitials: boolean;
+  /** Current 3 letters being entered + which slot is live. */
+  initials: string;
+  initialsPos: number;
   bossLit: boolean;
   bossActive: boolean;
   bossHp: number;

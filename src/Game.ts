@@ -31,6 +31,7 @@ import {
 } from './constants';
 
 const HIGH_SCORE_KEY = 'chicago-pinball-high-score';
+const INITIALS_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
 /** Per-player game state (alternating play, Stern-style). */
 interface PlayerState {
@@ -116,7 +117,12 @@ export class Game {
   private matchNumber = 0;
   private matched = false;
   private respawnTimer = 0;
-  private highScore = loadHighScore();
+  private highScore = loadHighScore().score;
+  private highScoreInitials = loadHighScore().initials;
+  // Arcade initials entry at game over (new high score only).
+  private enteringInitials = false;
+  private initialsChars = [0, 0, 0];
+  private initialsPos = 0;
 
   private get cur(): PlayerState {
     return this.players[this.current];
@@ -200,6 +206,12 @@ export class Game {
   }
 
   private resolveTouchKey(x: number, y: number): VirtualKey | null {
+    if (this.state === GameState.GAME_OVER && this.enteringInitials) {
+      // Letter entry: side thirds cycle, middle locks the letter in.
+      if (x < PLAYFIELD_W / 3) return 'leftFlipper';
+      if (x > (2 * PLAYFIELD_W) / 3) return 'rightFlipper';
+      return 'enter';
+    }
     if (this.state === GameState.TITLE || this.state === GameState.GAME_OVER) return 'enter';
     if (this.state === GameState.READY) return 'plunger';
     if (this.state === GameState.BALL_DRAINED) return null;
@@ -549,6 +561,7 @@ export class Game {
       this.sound.crowd(1000, 0.16);
       this.sound.speak(`${sport.mode.toLowerCase()}!`, true);
       this.renderer.pushToast(`${sport.mode}!`, COLOR.NEON_AMBER, 1600);
+      this.syncMusic();
       if (this.sportHits === sport.goal - 1) {
         // Two-shot modes go straight to the finale.
         this.startHurryUp(sportIdx);
@@ -581,6 +594,7 @@ export class Game {
     const sport = SPORTS[sportIdx];
     this.activeSport = -1;
     this.cur.sportsDone[sportIdx] = true;
+    this.syncMusic();
     this.renderer.sportEvent(sportIdx, 'complete');
     this.renderer.pushToast(`${sport.sport} COMPLETE!`, COLOR.NEON_AMBER, 2000);
     this.renderer.triggerJackpotFlash();
@@ -592,6 +606,20 @@ export class Game {
       this.renderer.pushToast('CROSSTOWN CHAMPIONSHIP LIT AT THE SCOOP', COLOR.INSERT_RED, 2200);
       this.sound.lock();
       this.sound.speak('Crosstown championship is lit!', true);
+    }
+  }
+
+  /** One music arbiter: wizard/crosstown/multiball outrank the sport
+   *  groove, which outranks the main Chicago shuffle. startMusic no-ops
+   *  when the mode is unchanged, so this is safe to call at every
+   *  transition. */
+  private syncMusic() {
+    if (this.bossActive || this.crosstownActive || this.multiballActive) {
+      this.sound.startMusic('action');
+    } else if (this.activeSport >= 0) {
+      this.sound.startMusic(SPORTS[this.activeSport].id);
+    } else {
+      this.sound.startMusic('main');
     }
   }
 
@@ -638,7 +666,7 @@ export class Game {
     this.sound.multiball();
     this.sound.crowd(1600, 0.24);
     this.sound.speak('Crosstown championship! Hit every sport!', true);
-    this.sound.startMusic('action');
+    this.syncMusic();
   }
 
   private crosstownWin() {
@@ -654,7 +682,7 @@ export class Game {
     this.sound.knocker();
     this.sound.crowd(2000, 0.28);
     this.sound.speak('Crosstown champion! The showdown is lit!', true);
-    this.sound.startMusic('main');
+    this.syncMusic();
     this.checkReplay();
   }
 
@@ -663,7 +691,7 @@ export class Game {
     // All five sports stay complete, so the championship relights at the scoop.
     this.renderer.pushToast('CHAMPIONSHIP OVER — RELIT AT THE SCOOP', COLOR.TEXT_DIM, 1600);
     this.sound.bossFail();
-    this.sound.startMusic('main');
+    this.syncMusic();
   }
 
   private startBoss() {
@@ -682,7 +710,7 @@ export class Game {
     this.sound.bossStart();
     this.sound.crowd(1800, 0.26);
     this.sound.speak('Windy city showdown!', true);
-    this.sound.startMusic('action');
+    this.syncMusic();
   }
 
   private bossDefeat() {
@@ -700,7 +728,7 @@ export class Game {
     this.sound.bossDefeat();
     this.sound.crowd(2400, 0.3);
     this.sound.speak('City champion! Extra ball!', true);
-    this.sound.startMusic('main');
+    this.syncMusic();
     this.checkReplay();
   }
 
@@ -710,7 +738,7 @@ export class Game {
     this.renderer.pushToast('THE TITLE SLIPS AWAY — RELIT AT THE SCOOP', COLOR.TEXT_DIM, 1600);
     this.sound.bossFail();
     this.sound.speak('So close…');
-    this.sound.startMusic('main');
+    this.syncMusic();
   }
 
   /** Replay: first crossing of the threshold pays an extra ball + knocker. */
@@ -733,7 +761,7 @@ export class Game {
       this.renderer.kick(5); // the release burst rocks the cabinet
       this.sound.multiball();
       this.sound.speak('Lake Shore multiball!', true);
-      this.sound.startMusic('action');
+      this.syncMusic();
       this.hadMultiball = true;
     } else {
       // Lock progress feedback + auto-serve a fresh ball.
@@ -756,7 +784,7 @@ export class Game {
       if (this.multiballActive) {
         this.multiballActive = false;
         this.renderer.pushToast('MULTIBALL OVER', COLOR.TEXT_DIM, 900);
-        if (!this.bossActive) this.sound.startMusic('main');
+        this.syncMusic();
       }
       return;
     }
@@ -819,7 +847,11 @@ export class Game {
       return;
     }
     if (this.state === GameState.GAME_OVER) {
-      if (this.input.wasPressed('enter')) this.state = GameState.TITLE;
+      if (this.enteringInitials) {
+        this.tickInitialsEntry();
+      } else if (this.input.wasPressed('enter')) {
+        this.state = GameState.TITLE;
+      }
       this.renderer.tick(dtMs);
       this.input.endFrame();
       return;
@@ -905,6 +937,7 @@ export class Game {
       if (this.sportMsLeft <= 0) {
         this.renderer.pushToast(`${SPORTS[this.activeSport].mode} OVER`, COLOR.TEXT_DIM, 1200);
         this.activeSport = -1;
+        this.syncMusic();
       }
       // Hurry-up finale counts down to its floor.
       if (this.hurryUpValue > HURRYUP_FLOOR) {
@@ -966,6 +999,34 @@ export class Game {
     this.input.endFrame();
   }
 
+  /** Classic 3-letter entry: flippers cycle the letter, plunger/start
+   *  locks it in. Runs inside GAME_OVER when a new high score was set. */
+  private tickInitialsEntry() {
+    const n = INITIALS_ALPHABET.length;
+    if (this.input.wasPressed('leftFlipper')) {
+      this.initialsChars[this.initialsPos] = (this.initialsChars[this.initialsPos] + n - 1) % n;
+      this.sound.rollover();
+    }
+    if (this.input.wasPressed('rightFlipper')) {
+      this.initialsChars[this.initialsPos] = (this.initialsChars[this.initialsPos] + 1) % n;
+      this.sound.rollover();
+    }
+    if (this.input.wasPressed('enter') || this.input.wasPressed('plunger')) {
+      this.initialsPos++;
+      this.sound.dropTarget();
+      if (this.initialsPos > 2) {
+        this.enteringInitials = false;
+        this.highScoreInitials = this.initialsChars
+          .map((c) => INITIALS_ALPHABET[c])
+          .join('');
+        saveHighScore(this.highScore, this.highScoreInitials);
+        this.renderer.pushToast(`${this.highScoreInitials} — TOP OF THE CITY`, COLOR.NEON_AMBER, 2200);
+        this.sound.knocker();
+        this.sound.speak(`Nice one, ${this.highScoreInitials.split('').join(' ')}!`, true);
+      }
+    }
+  }
+
   private startNextBall() {
     this.playfield.resetBall();
     this.bonusUnits = 0;
@@ -992,8 +1053,12 @@ export class Game {
     const best = Math.max(...this.players.map((p) => p.score));
     if (best > this.highScore) {
       this.highScore = best;
-      saveHighScore(this.highScore);
-      this.renderer.pushToast('NEW HIGH SCORE!', COLOR.NEON_AMBER, 2200);
+      // Saved once the initials are locked in.
+      this.enteringInitials = true;
+      this.initialsChars = [0, 0, 0];
+      this.initialsPos = 0;
+      this.renderer.pushToast('NEW HIGH SCORE — ENTER YOUR INITIALS', COLOR.NEON_AMBER, 2600);
+      this.sound.speak('New high score! Enter your initials.', true);
     }
     // Match sequence — last two digits vs a random decade; celebratory
     // knocker on a hit, like the real free-game moment.
@@ -1050,6 +1115,10 @@ export class Game {
       bonusX: this.bonusX,
       ballSaveMs: this.ballSaveMs,
       highScore: this.highScore,
+      highScoreInitials: this.highScoreInitials,
+      enteringInitials: this.enteringInitials,
+      initials: this.initialsChars.map((c) => INITIALS_ALPHABET[c]).join(''),
+      initialsPos: this.initialsPos,
       bossLit: this.bossLit,
       bossActive: this.bossActive,
       bossHp: this.bossHp,
@@ -1094,17 +1163,22 @@ export class Game {
   }
 }
 
-function loadHighScore(): number {
+function loadHighScore(): { score: number; initials: string } {
   try {
-    return Number(localStorage.getItem(HIGH_SCORE_KEY)) || 0;
+    const raw = localStorage.getItem(HIGH_SCORE_KEY);
+    if (!raw) return { score: 0, initials: '' };
+    // Older versions stored a bare number.
+    if (/^\d+$/.test(raw)) return { score: Number(raw) || 0, initials: '' };
+    const parsed = JSON.parse(raw) as { score?: number; initials?: string };
+    return { score: parsed.score ?? 0, initials: parsed.initials ?? '' };
   } catch {
-    return 0;
+    return { score: 0, initials: '' };
   }
 }
 
-function saveHighScore(score: number) {
+function saveHighScore(score: number, initials: string) {
   try {
-    localStorage.setItem(HIGH_SCORE_KEY, String(score));
+    localStorage.setItem(HIGH_SCORE_KEY, JSON.stringify({ score, initials }));
   } catch {
     /* private mode etc. — high score just isn't persisted */
   }

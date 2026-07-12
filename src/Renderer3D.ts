@@ -63,6 +63,11 @@ export class Renderer3D {
   private built = false;
   private ballMeshes = new Map<Matter.Body, THREE.Mesh>();
   private ballPool: THREE.Mesh[] = [];
+  // Motion trails: recent positions per ball + a shared pool of fading
+  // ghost spheres (TRAIL_LEN per concurrent ball, laid out per frame).
+  private trailHist = new Map<Matter.Body, THREE.Vector3[]>();
+  private trailMeshes: THREE.Mesh[] = [];
+  private static readonly TRAIL_LEN = 6;
   private flipperGroups: { group: THREE.Group; pf: 'left' | 'right' }[] = [];
   private spinnerMesh: THREE.Mesh | null = null;
   private captiveMesh: THREE.Mesh | null = null;
@@ -1535,6 +1540,8 @@ export class Renderer3D {
       }
     }
 
+    this.updateTrails(pf);
+
     // Flippers / spinner / captive.
     for (const f of this.flipperGroups) {
       const flip = f.pf === 'left' ? pf.leftFlipper : pf.rightFlipper;
@@ -1591,6 +1598,61 @@ export class Renderer3D {
 
     this.three.render(this.scene, this.camera);
     this.drawOverlay(pf, hud);
+  }
+
+  /** Fading ghost spheres behind each moving ball — speed made visible. */
+  private updateTrails(pf: Playfield) {
+    const LEN = Renderer3D.TRAIL_LEN;
+    // Record history for live balls; drop stale entries.
+    const live = new Set<Matter.Body>();
+    for (const b of pf.balls) {
+      live.add(b.body);
+      let hist = this.trailHist.get(b.body);
+      if (!hist) {
+        hist = [];
+        this.trailHist.set(b.body, hist);
+      }
+      const transit = (b.body as unknown as { $transit?: boolean }).$transit;
+      hist.push(new THREE.Vector3(b.body.position.x, transit ? 30 : BALL_RADIUS, b.body.position.y));
+      if (hist.length > LEN + 1) hist.shift();
+    }
+    for (const body of this.trailHist.keys()) {
+      if (!live.has(body)) this.trailHist.delete(body);
+    }
+    // Grow the shared pool on demand, then lay the ghosts out.
+    const needed = pf.balls.length * LEN;
+    while (this.trailMeshes.length < needed) {
+      const i = this.trailMeshes.length % LEN;
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(BALL_RADIUS * (0.75 - i * 0.09), 10, 8),
+        new THREE.MeshBasicMaterial({
+          color: 0xbfd8ff,
+          transparent: true,
+          opacity: 0.26 - i * 0.036,
+          depthWrite: false,
+        }),
+      );
+      mesh.visible = false;
+      this.trailMeshes.push(mesh);
+      this.scene.add(mesh);
+    }
+    let slot = 0;
+    for (const b of pf.balls) {
+      const hist = this.trailHist.get(b.body)!;
+      const v = Matter.Body.getVelocity(b.body);
+      const fast = Math.hypot(v.x, v.y) > 5;
+      for (let i = 0; i < LEN; i++) {
+        const mesh = this.trailMeshes[slot++];
+        const p = hist[hist.length - 2 - i];
+        if (!fast || !p) {
+          mesh.visible = false;
+          continue;
+        }
+        mesh.visible = true;
+        mesh.position.copy(p);
+      }
+    }
+    for (let i = slot; i < this.trailMeshes.length; i++) this.trailMeshes[i].visible = false;
   }
 
   /** The L: one lap around the skyline, driven by the game clock. */
@@ -1703,17 +1765,25 @@ export class Renderer3D {
     d.clear();
     if (hud.state === GameState.TITLE || hud.state === GameState.GAME_OVER) {
       d.centerText(hud.state === GameState.TITLE ? 'WINDY CITY SHOWDOWN' : 'GAME OVER', 1);
+      const hsTag = hud.highScoreInitials ? `${hud.highScoreInitials} ` : '';
       const msgs =
         hud.state === GameState.TITLE
           ? [
               'CHICAGO SPORTS',
-              hud.highScore > 0 ? `HIGH SCORE ${hud.highScore.toLocaleString()}` : 'FREE PLAY',
+              hud.highScore > 0 ? `HI ${hsTag}${hud.highScore.toLocaleString()}` : 'FREE PLAY',
               'PRESS ENTER',
             ]
-          : [
-              `FINAL ${Math.max(...hud.playerScores).toLocaleString()}`,
-              hud.matched ? 'MATCH!' : 'PRESS ENTER',
-            ];
+          : hud.enteringInitials
+            ? [
+                `INITIALS ${hud.initials
+                  .split('')
+                  .map((c, i) => (i < hud.initialsPos ? c : i === hud.initialsPos ? c : '-'))
+                  .join(' ')}`,
+              ]
+            : [
+                `FINAL ${Math.max(...hud.playerScores).toLocaleString()}`,
+                hud.matched ? 'MATCH!' : 'PRESS ENTER',
+              ];
       d.centerText(msgs[Math.floor(performance.now() / 2200) % msgs.length], 10);
       return;
     }
@@ -1817,7 +1887,8 @@ export class Renderer3D {
       if (hud.highScore > 0) {
         ctx.fillStyle = COLOR.TEXT_GOLD;
         ctx.font = 'bold 15px "Helvetica Neue", Arial, sans-serif';
-        ctx.fillText(`HIGH SCORE  ${hud.highScore.toLocaleString()}`, PLAYFIELD_W / 2, 540);
+        const tag = hud.highScoreInitials ? `${hud.highScoreInitials}  ` : '';
+        ctx.fillText(`HIGH SCORE  ${tag}${hud.highScore.toLocaleString()}`, PLAYFIELD_W / 2, 540);
       }
       if (Math.sin(performance.now() / 300) > 0) {
         ctx.shadowColor = COLOR.NEON_AMBER;
@@ -1861,7 +1932,27 @@ export class Renderer3D {
         PLAYFIELD_W / 2,
         after + 26,
       );
-      if (Math.sin(performance.now() / 300) > 0) {
+      if (hud.enteringInitials) {
+        ctx.fillStyle = COLOR.NEON_AMBER;
+        ctx.font = 'bold 17px "Helvetica Neue", Arial, sans-serif';
+        ctx.fillText('ENTER YOUR INITIALS', PLAYFIELD_W / 2, after + 58);
+        const blinkOn = Math.sin(performance.now() / 220) > -0.3;
+        for (let i = 0; i < 3; i++) {
+          const x = PLAYFIELD_W / 2 + (i - 1) * 44;
+          const active = i === hud.initialsPos;
+          ctx.strokeStyle = active ? COLOR.NEON_AMBER : COLOR.TEXT_DIM;
+          ctx.lineWidth = active ? 2.5 : 1.5;
+          ctx.strokeRect(x - 16, after + 76, 32, 38);
+          if (!active || blinkOn) {
+            ctx.fillStyle = active ? '#ffffff' : COLOR.TEXT_DIM;
+            ctx.font = 'bold 26px "Helvetica Neue", Arial, sans-serif';
+            ctx.fillText(i < hud.initialsPos ? hud.initials[i] : active ? hud.initials[i] : '·', x, after + 96);
+          }
+        }
+        ctx.fillStyle = COLOR.TEXT_DIM;
+        ctx.font = '11px "Helvetica Neue", Arial, sans-serif';
+        ctx.fillText('FLIPPERS CHANGE LETTER · SPACE / ENTER LOCKS IT', PLAYFIELD_W / 2, after + 132);
+      } else if (Math.sin(performance.now() / 300) > 0) {
         ctx.fillStyle = COLOR.NEON_CYAN;
         ctx.font = 'bold 16px "Helvetica Neue", Arial, sans-serif';
         ctx.fillText('PRESS ENTER FOR TITLE', PLAYFIELD_W / 2, after + 62);
