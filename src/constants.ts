@@ -46,8 +46,15 @@ export const LOCKS_FOR_MULTIBALL = 3;
 // How long the scoop holds the ball before kicking it back into play (ms).
 export const SCOOP_HOLD_MS = 900;
 
-// City Tour: each landmark stop gives this long before the tour ends.
-export const TOUR_STOP_MS = 20000;
+// Sports modes: each mode gives this long to finish its shots; the
+// Crosstown Championship mini-wizard gets a longer clock.
+export const SPORT_MODE_MS = 30000;
+export const CROSSTOWN_MS = 60000;
+
+// The elevated train does one lap past the skyline every cycle; the lap
+// itself takes TRAIN_LAP_MS at the start of each period.
+export const TRAIN_PERIOD_MS = 26000;
+export const TRAIN_LAP_MS = 9000;
 
 // Nudge / tilt: each nudge adds 1 heat; heat decays per second; exceeding
 // the limit tilts — flippers dead and bonus forfeited for the ball.
@@ -68,9 +75,9 @@ export const MAX_BONUS_X = 5;
 // COMBO × chain length on top.
 export const COMBO_WINDOW_MS = 4000;
 
-// CAPONE SHOWDOWN boss battle: lit by spelling CHICAGO or reaching
-// multiball, started at the MODE scoop. Two-ball, timed; shots deal
-// damage; deplete the health bar to win.
+// WINDY CITY SHOWDOWN final wizard mode: lit by winning the Crosstown
+// Championship, started at the scoop. Two-ball, timed; shots deal
+// damage; deplete the rival's bar to take the title.
 export const BOSS_HP = 60;
 export const BOSS_MS = 45000;
 
@@ -101,8 +108,11 @@ export const POINTS = {
   COMBO: 1500,
   LOOP: 3000,
   BOSS_DEFEAT: 250000,
-  TOUR_STOP: 15000,
-  TOUR_COMPLETE: 100000,
+  SPORT_SHOT: 15000,
+  SPORT_COMPLETE: 75000,
+  CROSSTOWN_SHOT: 25000,
+  CROSSTOWN_COMPLETE: 200000,
+  CITY_LIGHTS: 40000,
 };
 
 // ── Palette ────────────────────────────────────────────────────────────────

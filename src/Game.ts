@@ -4,7 +4,7 @@ import { Playfield } from './scene/Playfield';
 import { HudInfo } from './Renderer';
 import { InputManager, VirtualKey } from './InputManager';
 import { Sound } from './Sound';
-import { GameState, ScoreEvent } from './types';
+import { GameState, ScoreEvent, SPORTS, SportId } from './types';
 import {
   STARTING_BALLS,
   COLOR,
@@ -16,7 +16,10 @@ import {
   COMBO_WINDOW_MS,
   BOSS_HP,
   BOSS_MS,
-  TOUR_STOP_MS,
+  SPORT_MODE_MS,
+  CROSSTOWN_MS,
+  TRAIN_PERIOD_MS,
+  TRAIN_LAP_MS,
   TILT_LIMIT,
   TILT_DECAY_PER_S,
   REPLAY_SCORE,
@@ -33,6 +36,9 @@ interface PlayerState {
   hadMultiball: boolean;
   bossLit: boolean;
   replayAwarded: boolean;
+  /** One flag per entry in SPORTS — the Crosstown ladder. */
+  sportsDone: boolean[];
+  crosstownDone: boolean;
 }
 
 function newPlayer(): PlayerState {
@@ -43,6 +49,8 @@ function newPlayer(): PlayerState {
     hadMultiball: false,
     bossLit: false,
     replayAwarded: false,
+    sportsDone: SPORTS.map(() => false),
+    crosstownDone: false,
   };
 }
 
@@ -51,6 +59,8 @@ export interface GameRenderer {
   pushToast(text: string, color?: string, ttl?: number): void;
   triggerJackpotFlash(): void;
   kick(amp: number): void;
+  /** Attraction feedback: goal lights, bat swings, net flashes. */
+  sportEvent(sportIdx: number, type: 'start' | 'hit' | 'complete'): void;
   tick(dtMs: number): void;
   draw(pf: Playfield, hud: HudInfo): void;
 }
@@ -71,21 +81,7 @@ const BONUS_UNITS: Partial<Record<ScoreEvent['kind'], number>> = {
   'skill-shot': 2,
 };
 
-/** The City Tour itinerary: each stop is one specific shot, in order. */
-export interface TourStop {
-  name: string;
-  kind: ScoreEvent['kind'];
-  letter?: string;
-}
-const TOUR_STOPS: TourStop[] = [
-  { name: 'WILLIS TOWER', kind: 'ramp', letter: 'L' },
-  { name: 'RIDE THE L', kind: 'ramp', letter: 'R' },
-  { name: 'NAVY PIER', kind: 'loop' },
-  { name: 'THE BEAN', kind: 'bean' },
-  { name: 'WRIGLEY FIELD', kind: 'captive' },
-];
-
-/** Damage each scoring event deals to Capone during the SHOWDOWN. */
+/** Damage each scoring event deals to the rival during the SHOWDOWN. */
 const BOSS_DAMAGE: Partial<Record<ScoreEvent['kind'], number>> = {
   bean: 6,
   ramp: 10,
@@ -146,11 +142,22 @@ export class Game {
     this.cur.hadMultiball = v;
   }
 
-  // City Tour + multiball
-  /** Index into TOUR_STOPS, or -1 when no tour is running. */
-  private tourIdx = -1;
-  private tourMsLeft = 0;
+  // Sports modes + Crosstown Championship + multiball
+  /** Index into SPORTS, or -1 when no sport mode is running. */
+  private activeSport = -1;
+  private sportHits = 0;
+  private sportMsLeft = 0;
+  private crosstownActive = false;
+  /** Sport indices still to be shot during the Crosstown Championship. */
+  private crosstownLeft: number[] = [];
+  private crosstownMsLeft = 0;
   private multiballActive = false;
+  // City Lights: complete both standup team pairs in one ball.
+  private pairCubsBears = false;
+  private pairBullsSox = false;
+  private cityLightsAwarded = false;
+  // The L runs a lap past the skyline on a fixed schedule.
+  private lastTrainCycle = -1;
 
   // Nudge / tilt
   private tiltHeat = 0;
@@ -240,11 +247,11 @@ export class Game {
         }
       },
       () => {
-        if (this.tourIdx >= 0) {
-          // Spot the current stop.
-          const stop = TOUR_STOPS[this.tourIdx];
-          this.handleScore({ kind: stop.kind, points: 0, letter: stop.letter });
-          this.renderer.pushToast('MYSTERY: STOP SPOTTED', COLOR.INSERT_CYAN, 1500);
+        if (this.activeSport >= 0) {
+          // Spot one shot of the running sport mode.
+          const sport = SPORTS[this.activeSport];
+          this.handleScore({ kind: sport.kind, points: 0, letter: sport.letter });
+          this.renderer.pushToast('MYSTERY: SHOT SPOTTED', COLOR.INSERT_CYAN, 1500);
         } else {
           this.score += 10000;
           this.renderer.pushToast('MYSTERY: 10,000', COLOR.NEON_AMBER, 1500);
@@ -287,29 +294,12 @@ export class Game {
       this.lastComboAt = this.timeMs;
     }
 
-    // City Tour: hitting the CURRENT stop's shot advances the itinerary.
-    if (this.tourIdx >= 0) {
-      const stop = TOUR_STOPS[this.tourIdx];
-      if (e.kind === stop.kind && (!stop.letter || stop.letter === e.letter)) {
-        pts += POINTS.TOUR_STOP;
-        this.tourIdx++;
-        if (this.tourIdx >= TOUR_STOPS.length) {
-          this.tourIdx = -1;
-          this.score += POINTS.TOUR_COMPLETE;
-          this.cur.extraBalls++;
-          this.renderer.pushToast('TOUR COMPLETE!', COLOR.NEON_AMBER, 2000);
-          this.renderer.pushToast('EXTRA BALL', COLOR.NEON_GREEN, 2000);
-          this.renderer.triggerJackpotFlash();
-          this.sound.tourComplete();
-          this.sound.speak('Tour complete! Extra ball!', true);
-        } else {
-          this.tourMsLeft = TOUR_STOP_MS;
-          this.renderer.pushToast(`✓ ${stop.name} +${POINTS.TOUR_STOP.toLocaleString()}`, COLOR.INSERT_CYAN, 1300);
-          this.renderer.pushToast(`NEXT: ${TOUR_STOPS[this.tourIdx].name}`, COLOR.TEXT_DIM, 1300);
-          this.sound.tourStop();
-        }
-      }
-    }
+    // Sports: this shot may advance the Crosstown Championship, advance the
+    // running sport mode, or start a fresh one.
+    const sportIdx = SPORTS.findIndex(
+      (s) => s.kind === e.kind && (!s.letter || s.letter === e.letter),
+    );
+    if (sportIdx >= 0) pts += this.handleSportShot(sportIdx, e.kind);
     // Multiball jackpot: ramp / scoop hits during multiball pay big.
     if (this.multiballActive && this.isJackpotShot(e.kind)) {
       pts += POINTS.MULTIBALL_JACKPOT;
@@ -337,7 +327,6 @@ export class Game {
         this.renderer.kick(5);
         this.sound.jackpot();
         this.spelledChicago = true;
-        this.maybeLightBoss();
         break;
       case 'skill-shot':
         this.renderer.pushToast(`SKILL SHOT +${e.points.toLocaleString()}`, COLOR.NEON_AMBER, 1200);
@@ -408,14 +397,31 @@ export class Game {
         if (litOf('cubs') && litOf('bears') && !this.kickbackLit) {
           unlight(['cubs', 'bears']);
           this.kickbackLit = true;
+          this.pairCubsBears = true;
           this.renderer.pushToast('KICKBACK LIT', COLOR.NEON_GREEN, 1300);
           this.sound.rollover();
         }
         if (litOf('bulls') && litOf('sox') && !this.mysteryLit) {
           unlight(['bulls', 'sox']);
           this.mysteryLit = true;
+          this.pairBullsSox = true;
           this.renderer.pushToast('MYSTERY LIT AT THE LAKE', COLOR.RIVER_HI, 1300);
           this.sound.rollover();
+        }
+        // City Lights: both team pairs completed on the same ball lights
+        // every star on the board for a bonus.
+        if (this.pairCubsBears && this.pairBullsSox && !this.cityLightsAwarded) {
+          this.cityLightsAwarded = true;
+          this.score += POINTS.CITY_LIGHTS;
+          this.advanceBonusX();
+          this.renderer.pushToast(
+            `CITY LIGHTS! +${POINTS.CITY_LIGHTS.toLocaleString()}`,
+            COLOR.INSERT_CYAN,
+            2000,
+          );
+          this.renderer.triggerJackpotFlash();
+          this.sound.jackpot();
+          this.sound.speak('City lights!', true);
         }
         break;
       }
@@ -431,26 +437,166 @@ export class Game {
     return kind === 'ramp' || kind === 'loop' || kind === 'scoop';
   }
 
-  /** MODE scoop routing: boss fight if SHOWDOWN is lit, City Tour otherwise. */
+  private get crosstownReady(): boolean {
+    return (
+      this.cur.sportsDone.every(Boolean) && !this.cur.crosstownDone && !this.crosstownActive
+    );
+  }
+
+  /** One shot at a sport attraction. Returns bonus points earned. */
+  private handleSportShot(sportIdx: number, kind: ScoreEvent['kind']): number {
+    const sport = SPORTS[sportIdx];
+
+    // Crosstown Championship: collect each sport's shot once.
+    if (this.crosstownActive) {
+      const at = this.crosstownLeft.indexOf(sportIdx);
+      if (at < 0) return 0;
+      this.crosstownLeft.splice(at, 1);
+      this.renderer.sportEvent(sportIdx, 'hit');
+      this.sportStinger(sport.id);
+      if (this.crosstownLeft.length === 0) {
+        this.crosstownWin();
+      } else {
+        this.renderer.pushToast(
+          `✓ ${sport.sport} — ${this.crosstownLeft.length} TO GO`,
+          COLOR.INSERT_CYAN,
+          1300,
+        );
+      }
+      return POINTS.CROSSTOWN_SHOT;
+    }
+
+    // Advance the running sport mode.
+    if (this.activeSport === sportIdx) {
+      this.sportHits++;
+      this.sportMsLeft = SPORT_MODE_MS;
+      this.renderer.sportEvent(sportIdx, 'hit');
+      const pts = POINTS.SPORT_SHOT * this.sportHits;
+      if (this.sportHits >= sport.goal) {
+        this.completeSport(sportIdx);
+        return pts + POINTS.SPORT_COMPLETE;
+      }
+      this.sportStinger(sport.id);
+      this.renderer.pushToast(
+        `${sport.mode} ${this.sportHits}/${sport.goal} +${pts.toLocaleString()}`,
+        COLOR.NEON_AMBER,
+        1200,
+      );
+      return pts;
+    }
+
+    // Start a fresh mode — but the scoop defers to a lit wizard mode.
+    if (
+      this.activeSport < 0 &&
+      !this.bossActive &&
+      !this.cur.sportsDone[sportIdx] &&
+      !(kind === 'scoop' && (this.bossLit || this.crosstownReady))
+    ) {
+      this.activeSport = sportIdx;
+      this.sportHits = 1;
+      this.sportMsLeft = SPORT_MODE_MS;
+      this.renderer.sportEvent(sportIdx, 'start');
+      this.sportStinger(sport.id);
+      this.sound.crowd(1000, 0.16);
+      this.sound.speak(`${sport.mode.toLowerCase()}!`, true);
+      this.renderer.pushToast(`${sport.mode}!`, COLOR.NEON_AMBER, 1600);
+      this.renderer.pushToast(
+        `${sport.goal - 1} MORE: ${sport.shotName}`,
+        COLOR.TEXT_DIM,
+        1600,
+      );
+      return POINTS.SPORT_SHOT;
+    }
+    return 0;
+  }
+
+  private completeSport(sportIdx: number) {
+    const sport = SPORTS[sportIdx];
+    this.activeSport = -1;
+    this.cur.sportsDone[sportIdx] = true;
+    this.renderer.sportEvent(sportIdx, 'complete');
+    this.renderer.pushToast(`${sport.sport} COMPLETE!`, COLOR.NEON_AMBER, 2000);
+    this.renderer.triggerJackpotFlash();
+    this.renderer.kick(4);
+    this.sound.sportComplete();
+    this.sportStinger(sport.id);
+    this.sound.speak(`${sport.sport.toLowerCase()} complete!`, true);
+    if (this.crosstownReady) {
+      this.renderer.pushToast('CROSSTOWN CHAMPIONSHIP LIT AT THE SCOOP', COLOR.INSERT_RED, 2200);
+      this.sound.lock();
+      this.sound.speak('Crosstown championship is lit!', true);
+    }
+  }
+
+  /** The per-sport signature sound. */
+  private sportStinger(id: SportId) {
+    switch (id) {
+      case 'baseball':
+        this.sound.organSting();
+        break;
+      case 'hockey':
+        this.sound.goalHorn();
+        break;
+      case 'basketball':
+        this.sound.buzzer();
+        break;
+      case 'football':
+      case 'soccer':
+        this.sound.whistle();
+        break;
+    }
+  }
+
+  /** Scoop routing: wizard fight > Crosstown start > (sport handled by the
+   *  score event itself). */
   private startMode() {
     if (this.bossActive) return; // scoop hits during the fight just deal damage
     if (this.bossLit) {
       this.startBoss();
       return;
     }
-    if (this.tourIdx >= 0) return; // tour already running
-    this.tourIdx = 0;
-    this.tourMsLeft = TOUR_STOP_MS;
-    this.renderer.pushToast('CITY TOUR!', COLOR.INSERT_CYAN, 1400);
-    this.renderer.pushToast(`FIRST STOP: ${TOUR_STOPS[0].name}`, COLOR.TEXT_DIM, 1400);
+    if (this.crosstownReady) this.startCrosstown();
   }
 
-  private maybeLightBoss() {
-    if (this.bossActive || this.bossLit) return;
-    if (!this.spelledChicago && !this.hadMultiball) return;
+  private startCrosstown() {
+    this.crosstownActive = true;
+    this.activeSport = -1;
+    // The starting scoop shot counts as soccer — four shots remain.
+    this.crosstownLeft = SPORTS.map((_, i) => i).filter((i) => SPORTS[i].kind !== 'scoop');
+    this.crosstownMsLeft = CROSSTOWN_MS;
+    this.renderer.pushToast('CROSSTOWN CHAMPIONSHIP!', COLOR.INSERT_RED, 2200);
+    this.renderer.pushToast('HIT EVERY SPORT SHOT', COLOR.TEXT_DIM, 2200);
+    this.renderer.triggerJackpotFlash();
+    this.renderer.kick(4);
+    this.sound.multiball();
+    this.sound.crowd(1600, 0.24);
+    this.sound.speak('Crosstown championship! Hit every sport!', true);
+    this.sound.startMusic('action');
+  }
+
+  private crosstownWin() {
+    this.crosstownActive = false;
+    this.cur.crosstownDone = true;
     this.bossLit = true;
-    this.renderer.pushToast('SHOWDOWN LIT AT THE SCOOP', COLOR.INSERT_RED, 1800);
-    this.sound.lock();
+    this.score += POINTS.CROSSTOWN_COMPLETE;
+    this.cur.extraBalls++;
+    this.renderer.pushToast('CROSSTOWN CHAMPION!', COLOR.NEON_AMBER, 2400);
+    this.renderer.pushToast('WINDY CITY SHOWDOWN LIT AT THE SCOOP', COLOR.INSERT_RED, 2400);
+    this.renderer.triggerJackpotFlash();
+    this.renderer.kick(6);
+    this.sound.knocker();
+    this.sound.crowd(2000, 0.28);
+    this.sound.speak('Crosstown champion! The showdown is lit!', true);
+    this.sound.startMusic('main');
+    this.checkReplay();
+  }
+
+  private crosstownFail() {
+    this.crosstownActive = false;
+    // All five sports stay complete, so the championship relights at the scoop.
+    this.renderer.pushToast('CHAMPIONSHIP OVER — RELIT AT THE SCOOP', COLOR.TEXT_DIM, 1600);
+    this.sound.bossFail();
+    this.sound.startMusic('main');
   }
 
   private startBoss() {
@@ -458,41 +604,45 @@ export class Game {
     this.bossActive = true;
     this.bossHp = BOSS_HP;
     this.bossMsLeft = BOSS_MS;
-    this.tourIdx = -1; // the tour yields to the showdown
+    this.activeSport = -1; // any running mode yields to the showdown
+    this.crosstownActive = false;
     // Two-ball brawl: serve a second ball.
     this.playfield.serveBall(true);
-    this.renderer.pushToast('CAPONE SHOWDOWN!', COLOR.INSERT_RED, 2000);
+    this.renderer.pushToast('WINDY CITY SHOWDOWN!', COLOR.INSERT_RED, 2000);
+    this.renderer.pushToast('EVERY SHOT SCORES ON THE RIVAL', COLOR.TEXT_DIM, 2000);
     this.renderer.triggerJackpotFlash();
     this.renderer.kick(4);
     this.sound.bossStart();
-    this.sound.speak('Capone showdown!', true);
+    this.sound.crowd(1800, 0.26);
+    this.sound.speak('Windy city showdown!', true);
     this.sound.startMusic('action');
   }
 
   private bossDefeat() {
     this.bossActive = false;
-    this.spelledChicago = false;
-    this.hadMultiball = false;
+    // The whole ladder resets so the wizard chain can be climbed again.
+    this.cur.sportsDone = SPORTS.map(() => false);
+    this.cur.crosstownDone = false;
     this.score += POINTS.BOSS_DEFEAT;
     this.cur.extraBalls++;
     this.ballSaveMs = 10000; // victory lap
-    this.renderer.pushToast('CAPONE DEFEATED!', COLOR.NEON_AMBER, 2200);
+    this.renderer.pushToast('CITY CHAMPION!', COLOR.NEON_AMBER, 2200);
     this.renderer.pushToast('EXTRA BALL', COLOR.NEON_GREEN, 2200);
     this.renderer.triggerJackpotFlash();
     this.renderer.kick(6);
     this.sound.bossDefeat();
-    this.sound.speak('Capone is down! Extra ball!', true);
+    this.sound.crowd(2400, 0.3);
+    this.sound.speak('City champion! Extra ball!', true);
     this.sound.startMusic('main');
     this.checkReplay();
   }
 
   private bossFail() {
     this.bossActive = false;
-    this.spelledChicago = false;
-    this.hadMultiball = false;
-    this.renderer.pushToast('CAPONE GOT AWAY…', COLOR.TEXT_DIM, 1600);
+    this.bossLit = true; // the title match relights at the scoop
+    this.renderer.pushToast('THE TITLE SLIPS AWAY — RELIT AT THE SCOOP', COLOR.TEXT_DIM, 1600);
     this.sound.bossFail();
-    this.sound.speak('He got away…');
+    this.sound.speak('So close…');
     this.sound.startMusic('main');
   }
 
@@ -511,13 +661,12 @@ export class Game {
       // Multiball start — the locked balls fan out from the Bean.
       this.multiballActive = true;
       const released = this.playfield.releaseLocks();
-      this.renderer.pushToast(`MULTIBALL × ${released}`, COLOR.NEON_AMBER, 1600);
+      this.renderer.pushToast(`LAKE SHORE MULTIBALL × ${released}`, COLOR.NEON_AMBER, 1800);
       this.renderer.triggerJackpotFlash();
       this.sound.multiball();
-      this.sound.speak('Multiball!', true);
+      this.sound.speak('Lake Shore multiball!', true);
       this.sound.startMusic('action');
       this.hadMultiball = true;
-      this.maybeLightBoss();
     } else {
       // Lock progress feedback + auto-serve a fresh ball.
       this.renderer.pushToast(`LOCK ${this.playfield.bean.locked} / 3`, COLOR.INSERT_RED, 900);
@@ -562,6 +711,8 @@ export class Game {
       this.bossActive = false;
       this.bossLit = true;
     }
+    this.activeSport = -1;
+    this.crosstownActive = false; // relights at the scoop — the ladder keeps
     this.sound.drain();
     this.renderer.kick(4);
     const bonus = this.bonusUnits * BONUS_UNIT * this.bonusX;
@@ -681,11 +832,23 @@ export class Game {
     this.playfield.tick(dtMs);
     this.renderer.tick(dtMs);
 
-    if (this.tourIdx >= 0 && this.state === GameState.PLAYING) {
-      this.tourMsLeft -= dtMs;
-      if (this.tourMsLeft <= 0) {
-        this.tourIdx = -1;
-        this.renderer.pushToast('TOUR OVER', COLOR.TEXT_DIM, 1200);
+    if (this.activeSport >= 0 && this.state === GameState.PLAYING) {
+      this.sportMsLeft -= dtMs;
+      if (this.sportMsLeft <= 0) {
+        this.renderer.pushToast(`${SPORTS[this.activeSport].mode} OVER`, COLOR.TEXT_DIM, 1200);
+        this.activeSport = -1;
+      }
+    }
+    if (this.crosstownActive && this.state === GameState.PLAYING) {
+      this.crosstownMsLeft -= dtMs;
+      if (this.crosstownMsLeft <= 0) this.crosstownFail();
+    }
+    // The L: one lap past the skyline every cycle, with its rattle.
+    if (this.state === GameState.PLAYING || this.state === GameState.READY) {
+      const cycle = Math.floor(this.timeMs / TRAIN_PERIOD_MS);
+      if (cycle !== this.lastTrainCycle) {
+        this.lastTrainCycle = cycle;
+        this.sound.trainPass();
       }
     }
     if (this.state === GameState.PLAYING && this.ballSaveMs > 0) {
@@ -733,7 +896,11 @@ export class Game {
     this.bonusX = 1;
     this.comboCount = 0;
     this.lastComboAt = -1e9;
-    this.tourIdx = -1;
+    this.activeSport = -1;
+    this.crosstownActive = false;
+    this.pairCubsBears = false;
+    this.pairBullsSox = false;
+    this.cityLightsAwarded = false;
     this.tiltHeat = 0;
     this.tilted = false;
     this.kickbackLit = false;
@@ -776,11 +943,24 @@ export class Game {
       matched: this.matched,
       plungerHolding: this.playfield.plunger.isHolding(),
       multiball: this.multiballActive,
-      tourName: this.tourIdx >= 0 ? TOUR_STOPS[this.tourIdx].name : null,
-      tourKind: this.tourIdx >= 0 ? TOUR_STOPS[this.tourIdx].kind : null,
-      tourLetter: this.tourIdx >= 0 ? TOUR_STOPS[this.tourIdx].letter ?? null : null,
-      tourMsLeft: this.tourMsLeft,
-      tourIdx: this.tourIdx,
+      activeSport: this.activeSport,
+      modeName: this.crosstownActive
+        ? 'CROSSTOWN CHAMPIONSHIP'
+        : this.activeSport >= 0
+          ? SPORTS[this.activeSport].mode
+          : null,
+      modeKind: this.activeSport >= 0 ? SPORTS[this.activeSport].kind : null,
+      modeLetter: this.activeSport >= 0 ? (SPORTS[this.activeSport].letter ?? null) : null,
+      modeMsLeft: this.crosstownActive ? this.crosstownMsLeft : this.sportMsLeft,
+      modeHits: this.sportHits,
+      modeGoal: this.activeSport >= 0 ? SPORTS[this.activeSport].goal : 0,
+      sportsDone: [...this.cur.sportsDone],
+      crosstownActive: this.crosstownActive,
+      crosstownLeft: [...this.crosstownLeft],
+      trainPhase:
+        this.timeMs % TRAIN_PERIOD_MS < TRAIN_LAP_MS
+          ? (this.timeMs % TRAIN_PERIOD_MS) / TRAIN_LAP_MS
+          : -1,
       tiltHeat: this.tiltHeat,
       tilted: this.tilted,
       kickbackLit: this.kickbackLit,
@@ -803,7 +983,13 @@ export class Game {
     this.shootAgain = false;
     this.matchNumber = 0;
     this.matched = false;
-    this.tourIdx = -1;
+    this.activeSport = -1;
+    this.crosstownActive = false;
+    this.crosstownLeft = [];
+    this.pairCubsBears = false;
+    this.pairBullsSox = false;
+    this.cityLightsAwarded = false;
+    this.lastTrainCycle = -1;
     this.tiltHeat = 0;
     this.tilted = false;
     this.kickbackLit = false;

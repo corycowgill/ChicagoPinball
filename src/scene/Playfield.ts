@@ -705,6 +705,24 @@ export class Playfield {
       { x: this.playRight - 132, y: 558, r: 4 },
       { x: this.playRight - 172, y: 558, r: 4 },
     );
+
+    // ── STADIUM STANDOFFS — the raised arena over the flag banner stands on
+    //    four real posts, so the ball bounces off what it sees. They sit in
+    //    the open bounce area between the ramp mouths and the slingshots,
+    //    clear of every named shot lane. ──
+    for (const [px, py] of [
+      [209, 570],
+      [331, 570],
+      [209, 630],
+      [331, 630],
+    ]) {
+      const post = Matter.Bodies.circle(px, py, 5, {
+        isStatic: true,
+        label: 'wall',
+        restitution: 0.5,
+      });
+      this.addWall(post, 'rail');
+    }
   }
 
   // ── Ball management ──────────────────────────────────────────────────────

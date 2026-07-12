@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import Matter from 'matter-js';
-import { Playfield, PLAYFIELD_TOP } from './scene/Playfield';
+import { Playfield } from './scene/Playfield';
 import { Renderer, HudInfo } from './Renderer';
 import { Dmd } from './Dmd';
-import { drawCapone, decoStar } from './Graphics';
-import { GameState } from './types';
+import { decoStar } from './Graphics';
+import { GameState, SPORTS } from './types';
 import {
   PLAYFIELD_W,
   PLAYFIELD_H,
@@ -33,6 +33,11 @@ interface Pt {
  *  above the wood. One unit = one 2D pixel, so all layout numbers carry
  *  over directly from the physics. */
 const toV3 = (p: Pt, h = 0) => new THREE.Vector3(p.x, h, p.y);
+
+/** The dead shelf behind the back wall (z < ~172) where no ball can ever
+ *  roll — the skyline, the L and the DMD all live there, layered:
+ *  marquee (backbox) → buildings + train → DMD panel → playfield. */
+const SKYLINE_Z = 88;
 
 /** 3D presentation of the same 2D machine: the matter.js simulation is
  *  untouched — this renderer builds a Three.js table from the Playfield's
@@ -72,18 +77,44 @@ export class Renderer3D {
     kind:
       | { t: 'rollover'; i: number }
       | { t: 'chicago'; i: number }
-      | { t: 'tour'; i: number }
+      | { t: 'sport'; i: number }
       | { t: 'kickback' }
       | { t: 'mystery' }
       | { t: 'loop'; i: number };
   }[] = [];
   private floodlights: THREE.SpotLight[] = [];
 
+  // Skyline / train / stadium
+  private trainCars: THREE.Group[] = [];
+  private trainLight: THREE.PointLight | null = null;
+  private trainCurve: THREE.Curve<THREE.Vector3> | null = null;
+  private stadiumChase: THREE.MeshStandardMaterial[] = [];
+  private stadiumBanners: THREE.MeshStandardMaterial[] = [];
+
+  // Sports attraction FX — timers in ms, set by sportEvent().
+  private sportFx = SPORTS.map(() => 0);
+  private batGroup: THREE.Group | null = null;
+  private puckMesh: THREE.Mesh | null = null;
+  private hockeyLampMat: THREE.MeshStandardMaterial | null = null;
+  private basketNetMat: THREE.MeshStandardMaterial | null = null;
+  private footballPostMat: THREE.MeshStandardMaterial | null = null;
+  private soccerLampMat: THREE.MeshStandardMaterial | null = null;
+  private diamondFlashMat: THREE.MeshStandardMaterial | null = null;
+
+  private readonly quality: 'high' | 'mobile';
+
   constructor(glCanvas: HTMLCanvasElement, uiCanvas: HTMLCanvasElement) {
+    // Mobile GPUs get a lighter renderer: lower pixel ratio, no shadows.
+    const coarse =
+      typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+    this.quality = coarse ? 'mobile' : 'high';
+
     this.three = new THREE.WebGLRenderer({ canvas: glCanvas, antialias: true });
     this.three.setSize(540, 960, false);
-    this.three.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-    this.three.shadowMap.enabled = true;
+    this.three.setPixelRatio(
+      Math.min(this.quality === 'mobile' ? 1.5 : 2, window.devicePixelRatio || 1),
+    );
+    this.three.shadowMap.enabled = this.quality === 'high';
     this.three.shadowMap.type = THREE.PCFSoftShadowMap;
     this.three.toneMapping = THREE.ACESFilmicToneMapping;
     this.three.toneMappingExposure = 1.1;
@@ -91,17 +122,18 @@ export class Renderer3D {
     this.overlay = uiCanvas.getContext('2d')!;
     this.overlay.scale(2, 2); // ui canvas is 1080×1920 for crisp text
 
-    // High, near-top-down view filling the frame (the reference photo's
-    // framing): the whole table plus the backbox head, slight perspective.
+    // High, near-top-down view filling the frame: the whole table plus the
+    // backbox head, slight perspective. Fixed logical coordinates — CSS
+    // scales the canvas, never the physics.
     this.camera = new THREE.PerspectiveCamera(40, 540 / 960, 10, 4000);
     this.camera.position.set(PLAYFIELD_W / 2, 1010, PLAYFIELD_H + 210);
-    this.camera.lookAt(PLAYFIELD_W / 2, -20, 505);
+    this.camera.lookAt(PLAYFIELD_W / 2, -20, 495);
 
     this.scene.background = new THREE.Color('#04050c');
     this.scene.fog = new THREE.Fog('#04050c', 1800, 3200);
 
     // Lighting: soft ambient + a cool key + warm floodlights from the
-    // marquee corners, echoing the reference.
+    // marquee corners, echoing a showroom machine.
     this.scene.add(new THREE.AmbientLight(0x8899bb, 0.5));
     const key = new THREE.DirectionalLight(0xcfe0ff, 0.55);
     key.position.set(PLAYFIELD_W / 2, 900, 700);
@@ -109,9 +141,9 @@ export class Renderer3D {
     this.scene.add(key, key.target);
     for (const fx of [40, PLAYFIELD_W - 40]) {
       const spot = new THREE.SpotLight(0xffe7c0, 230000, 0, 0.55, 0.55, 1.8);
-      spot.position.set(fx, 330, 40);
+      spot.position.set(fx, 330, 16);
       spot.target.position.set(PLAYFIELD_W / 2, 0, 560);
-      spot.castShadow = true;
+      spot.castShadow = this.quality === 'high';
       spot.shadow.mapSize.set(1024, 1024);
       this.scene.add(spot, spot.target);
       this.floodlights.push(spot);
@@ -133,7 +165,7 @@ export class Renderer3D {
     this.dmdTexture.colorSpace = THREE.SRGBColorSpace;
   }
 
-  // ── Game-facing interface (same as the 2D renderer) ─────────────────────
+  // ── Game-facing interface ────────────────────────────────────────────────
 
   pushToast(text: string, color = COLOR.NEON_AMBER, ttl = 1400) {
     this.toasts.push({ text, color, ttl, total: ttl });
@@ -148,6 +180,10 @@ export class Renderer3D {
     this.shakeMs = 90;
   }
 
+  sportEvent(sportIdx: number, type: 'start' | 'hit' | 'complete') {
+    this.sportFx[sportIdx] = type === 'complete' ? 1600 : 900;
+  }
+
   tick(dtMs: number) {
     for (const t of this.toasts) t.ttl -= dtMs;
     this.toasts = this.toasts.filter((t) => t.ttl > 0);
@@ -156,7 +192,25 @@ export class Renderer3D {
       this.shakeMs -= dtMs;
       if (this.shakeMs <= 0) this.shakeAmp = 0;
     }
+    for (let i = 0; i < this.sportFx.length; i++) {
+      if (this.sportFx[i] > 0) this.sportFx[i] = Math.max(0, this.sportFx[i] - dtMs);
+    }
   }
+
+  // ── Shared materials ─────────────────────────────────────────────────────
+
+  private railMat = new THREE.MeshStandardMaterial({
+    color: 0xb8c2d4,
+    metalness: 0.9,
+    roughness: 0.28,
+  });
+  private chromeMat = new THREE.MeshStandardMaterial({
+    color: 0xdfe6f2,
+    metalness: 1,
+    roughness: 0.15,
+  });
+  private woodMat = new THREE.MeshStandardMaterial({ color: 0x2a1a10, roughness: 0.8 });
+  private rubberMat = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.9 });
 
   // ── Static table construction ────────────────────────────────────────────
 
@@ -173,6 +227,7 @@ export class Renderer3D {
     this.painter.drawPlayfieldFloor(fctx);
     this.painter.drawFloorArt(fctx, pf);
     this.painter.drawLakePool(fctx, pf);
+    this.paintSportsZones(fctx, pf);
     this.painter.drawPlayfieldDecals(fctx, pf);
     this.painter.drawStandupLabels(fctx, pf);
     const floorTex = new THREE.CanvasTexture(floorCanvas);
@@ -187,44 +242,365 @@ export class Renderer3D {
     floor.receiveShadow = true;
     this.scene.add(floor);
 
-    // Cabinet side walls (wood).
-    const woodMat = new THREE.MeshStandardMaterial({ color: 0x2a1a10, roughness: 0.8 });
+    this.buildCabinet();
+    this.buildBackbox();
+    this.buildSkyline();
+    this.buildStadium();
+    this.buildWallsAndPosts(pf);
+    this.buildToys(pf);
+    this.buildRampsAndWireforms(pf);
+    this.buildAttractions(pf);
+    this.buildLamps(pf);
+    if (new URLSearchParams(location.search).has('debug')) this.buildDebug(pf);
+  }
+
+  /** Cabinet: wooden body with visible playfield thickness, brushed side
+   *  rails and a chrome lockdown bar at the player end. */
+  private buildCabinet() {
+    // Playfield board thickness, visible at the drain edge.
+    const board = new THREE.Mesh(
+      new THREE.BoxGeometry(PLAYFIELD_W, 14, PLAYFIELD_H),
+      this.woodMat,
+    );
+    board.position.set(PLAYFIELD_W / 2, -7.2, PLAYFIELD_H / 2);
+    this.scene.add(board);
+
     for (const sx of [-8, PLAYFIELD_W + 8]) {
-      const side = new THREE.Mesh(new THREE.BoxGeometry(16, 90, PLAYFIELD_H + 40), woodMat);
+      const side = new THREE.Mesh(
+        new THREE.BoxGeometry(16, 90, PLAYFIELD_H + 40),
+        this.woodMat,
+      );
       side.position.set(sx, 30, PLAYFIELD_H / 2);
       this.scene.add(side);
+      // Brushed-steel side rail capping the wall.
+      const railCap = new THREE.Mesh(
+        new THREE.BoxGeometry(15, 5, PLAYFIELD_H + 40),
+        this.railMat,
+      );
+      railCap.position.set(sx, 77, PLAYFIELD_H / 2);
+      this.scene.add(railCap);
     }
-    // Backbox head: a standing cabinet at the top of the table carrying the
-    // marquee art and the DMD on its face.
-    const backbox = new THREE.Mesh(
-      new THREE.BoxGeometry(PLAYFIELD_W + 48, 230, 20),
-      woodMat,
+    // Lockdown bar across the player end.
+    const lockdown = new THREE.Mesh(
+      new THREE.BoxGeometry(PLAYFIELD_W + 48, 12, 26),
+      this.chromeMat,
     );
-    backbox.position.set(PLAYFIELD_W / 2, 105, 100);
+    lockdown.position.set(PLAYFIELD_W / 2, 36, PLAYFIELD_H + 26);
+    this.scene.add(lockdown);
+    const front = new THREE.Mesh(new THREE.BoxGeometry(PLAYFIELD_W + 48, 70, 18), this.woodMat);
+    front.position.set(PLAYFIELD_W / 2, -2, PLAYFIELD_H + 28);
+    this.scene.add(front);
+  }
+
+  /** Backbox at the very rear; marquee art on its face. The DMD rides a
+   *  speaker panel forward of the skyline so nothing occludes it. */
+  private buildBackbox() {
+    const backbox = new THREE.Mesh(
+      new THREE.BoxGeometry(PLAYFIELD_W + 48, 240, 20),
+      this.woodMat,
+    );
+    backbox.position.set(PLAYFIELD_W / 2, 84, 34);
     this.scene.add(backbox);
 
-    // Rails / posts / walls from the physics bodies.
-    const railMat = new THREE.MeshStandardMaterial({
-      color: 0xb8c2d4,
-      metalness: 0.9,
-      roughness: 0.28,
+    const marqueeCanvas = document.createElement('canvas');
+    marqueeCanvas.width = 1080;
+    marqueeCanvas.height = 240;
+    this.paintMarquee(marqueeCanvas.getContext('2d')!);
+    const marqueeTex = new THREE.CanvasTexture(marqueeCanvas);
+    marqueeTex.colorSpace = THREE.SRGBColorSpace;
+    const marquee = new THREE.Mesh(
+      new THREE.PlaneGeometry(PLAYFIELD_W + 40, 132),
+      new THREE.MeshBasicMaterial({ map: marqueeTex }),
+    );
+    // Top edge stays inside the camera frustum (~y 205 at this depth).
+    marquee.position.set(PLAYFIELD_W / 2, 136, 44.5);
+    this.scene.add(marquee);
+
+    // Speaker-panel wedge carrying the DMD, in front of the skyline.
+    const wedge = new THREE.Mesh(
+      new THREE.BoxGeometry(PLAYFIELD_W - 4, 12, 16),
+      new THREE.MeshStandardMaterial({ color: 0x120b08, roughness: 0.7 }),
+    );
+    wedge.position.set(PLAYFIELD_W / 2, 5, 121);
+    this.scene.add(wedge);
+    const dmdPanel = new THREE.Mesh(
+      new THREE.PlaneGeometry(PLAYFIELD_W - 20, 64),
+      new THREE.MeshBasicMaterial({ map: this.dmdTexture }),
+    );
+    dmdPanel.position.set(PLAYFIELD_W / 2, 40, 122);
+    dmdPanel.rotation.x = -0.12;
+    this.scene.add(dmdPanel);
+  }
+
+  /** Lit-window texture shared by all the miniature buildings. */
+  private makeWindowTexture(seed: number, tint: string): THREE.CanvasTexture {
+    const c = document.createElement('canvas');
+    c.width = 32;
+    c.height = 64;
+    const ctx = c.getContext('2d')!;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, 32, 64);
+    for (let y = 0; y < 16; y++) {
+      for (let x = 0; x < 6; x++) {
+        const h = (seed * 761 + x * 137 + y * 31) % 97;
+        if (h < 46) {
+          ctx.fillStyle = h < 8 ? tint : COLOR.WINDOW_LIGHT;
+          ctx.globalAlpha = 0.55 + (h % 5) / 10;
+          ctx.fillRect(2 + x * 5, 2 + y * 4, 3, 2);
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  /** The centerpiece: a modeled downtown on the dead shelf behind the back
+   *  wall, ringed by the elevated L track with a running train. */
+  private buildSkyline() {
+    const group = new THREE.Group();
+
+    // Riverwalk base plate under the towers.
+    const base = new THREE.Mesh(
+      new THREE.BoxGeometry(360, 6, 66),
+      new THREE.MeshStandardMaterial({ color: 0x101826, roughness: 0.9 }),
+    );
+    base.position.set(PLAYFIELD_W / 2, 3, SKYLINE_Z);
+    group.add(base);
+
+    const winTexA = this.makeWindowTexture(1, '#7fd1e8');
+    const winTexB = this.makeWindowTexture(2, '#ffb347');
+    const buildingMat = (tex: THREE.CanvasTexture) =>
+      new THREE.MeshStandardMaterial({
+        color: 0x0b1220,
+        roughness: 0.6,
+        emissive: 0xffffff,
+        emissiveMap: tex,
+        emissiveIntensity: 0.9,
+      });
+
+    const towers: Array<[number, number, number, number, number]> = [
+      // x, z, w, d, h — front faces stay behind the DMD (z + d/2 ≤ 114).
+      [105, 95, 36, 28, 42],
+      [158, 82, 34, 26, 58],
+      [196, 96, 30, 24, 78],
+      [232, 78, 34, 26, 100],
+      [312, 76, 32, 26, 88],
+      [348, 94, 30, 24, 66],
+      [382, 82, 32, 24, 48],
+      [435, 96, 34, 26, 44],
+    ];
+    towers.forEach(([x, z, w, d, h], i) => {
+      const b = new THREE.Mesh(
+        new THREE.BoxGeometry(w, h, d),
+        buildingMat(i % 2 ? winTexA : winTexB),
+      );
+      b.position.set(x, h / 2 + 4, z);
+      group.add(b);
+      // Rooftop beacon on the taller towers.
+      if (h > 70) {
+        const beacon = new THREE.Mesh(
+          new THREE.SphereGeometry(1.6, 8, 6),
+          new THREE.MeshBasicMaterial({ color: 0xff3a4f }),
+        );
+        beacon.position.set(x, h + 6, z);
+        group.add(beacon);
+      }
     });
+
+    // Willis-inspired tower: three stacked tiers + twin antennas.
+    const willisMat = buildingMat(winTexA);
+    const tiers: Array<[number, number, number]> = [
+      [40, 92, 30],
+      [28, 116, 22],
+      [18, 134, 14],
+    ];
+    for (const [w, top, d] of tiers) {
+      const tier = new THREE.Mesh(new THREE.BoxGeometry(w, top, d), willisMat);
+      tier.position.set(270, top / 2 + 4, 88);
+      group.add(tier);
+    }
+    // Antennas stop short of the marquee title line behind them.
+    for (const ax of [263, 277]) {
+      const antenna = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.8, 0.8, 14, 6),
+        this.chromeMat,
+      );
+      antenna.position.set(ax, 141, 88);
+      group.add(antenna);
+      const tip = new THREE.Mesh(
+        new THREE.SphereGeometry(1.3, 8, 6),
+        new THREE.MeshBasicMaterial({ color: 0xff3a4f }),
+      );
+      tip.position.set(ax, 149, 88);
+      group.add(tip);
+    }
+
+    // ── The elevated L loop around the skyline. ──
+    const ellipsePts = (y: number) => {
+      const pts: THREE.Vector3[] = [];
+      for (let i = 0; i < 48; i++) {
+        const a = (i / 48) * Math.PI * 2;
+        pts.push(
+          new THREE.Vector3(270 + Math.cos(a) * 135, y, SKYLINE_Z + Math.sin(a) * 26),
+        );
+      }
+      return pts;
+    };
+    const track = new THREE.CatmullRomCurve3(ellipsePts(42), true);
+    this.trainCurve = track;
+    const rail = new THREE.Mesh(new THREE.TubeGeometry(track, 64, 1.4, 6, true), this.railMat);
+    group.add(rail);
+    // Blue under-lighting beneath the track.
+    const glow = new THREE.Mesh(
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(ellipsePts(38), true), 64, 1.1, 6, true),
+      new THREE.MeshBasicMaterial({ color: 0x2a6cff }),
+    );
+    group.add(glow);
+    // Trestle legs — instanced, purely in the dead zone.
+    const legGeo = new THREE.CylinderGeometry(1.4, 1.4, 42, 6);
+    const legs = new THREE.InstancedMesh(legGeo, this.railMat, 12);
+    const m = new THREE.Matrix4();
+    for (let i = 0; i < 12; i++) {
+      const p = track.getPoint(i / 12);
+      m.setPosition(p.x, 21, p.z);
+      legs.setMatrixAt(i, m);
+    }
+    group.add(legs);
+
+    // Train cars (positions driven per-frame by hud.trainPhase).
+    const carBodyMat = new THREE.MeshStandardMaterial({
+      color: 0xb9c2cf,
+      metalness: 0.7,
+      roughness: 0.35,
+    });
+    const carWinMat = new THREE.MeshBasicMaterial({ color: 0xffe9a8 });
+    for (let i = 0; i < 3; i++) {
+      const car = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.BoxGeometry(26, 10, 9), carBodyMat);
+      body.position.y = 5;
+      car.add(body);
+      const stripe = new THREE.Mesh(
+        new THREE.BoxGeometry(26.4, 2.2, 9.4),
+        new THREE.MeshStandardMaterial({ color: 0xd62a3e, roughness: 0.5 }),
+      );
+      stripe.position.y = 2.4;
+      car.add(stripe);
+      const win = new THREE.Mesh(new THREE.BoxGeometry(22, 3, 9.6), carWinMat);
+      win.position.y = 6.4;
+      car.add(win);
+      car.visible = false;
+      this.trainCars.push(car);
+      group.add(car);
+    }
+    this.trainLight = new THREE.PointLight(0x5a9cff, 5000, 160, 2);
+    this.trainLight.visible = false;
+    group.add(this.trainLight);
+
+    this.scene.add(group);
+  }
+
+  /** Raised arena over the flag banner: an oval grandstand ring on chrome
+   *  standoffs (with matching physics posts), red/white/blue chase lights
+   *  and one lit banner per completed sport. */
+  private buildStadium() {
+    const cx = PLAYFIELD_W / 2;
+    const cz = 600;
+    const group = new THREE.Group();
+
+    // Grandstand tiers — two squashed tori.
+    const tierMat = new THREE.MeshStandardMaterial({ color: 0x46587a, roughness: 0.5 });
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(86, 7, 12, 48), tierMat);
+    rim.rotation.x = -Math.PI / 2;
+    rim.scale.set(1, 0.5, 1);
+    rim.position.set(cx, 34, cz);
+    group.add(rim);
+    const lower = new THREE.Mesh(
+      new THREE.TorusGeometry(80, 9, 12, 48),
+      new THREE.MeshStandardMaterial({ color: 0x2c3d5c, roughness: 0.65 }),
+    );
+    lower.rotation.x = -Math.PI / 2;
+    lower.scale.set(1, 0.5, 1);
+    lower.position.set(cx, 26, cz);
+    group.add(lower);
+
+    // Chase lights around the rim.
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0x223048,
+        emissive: new THREE.Color(i % 3 === 0 ? '#e6293e' : i % 3 === 1 ? '#f5fbff' : '#4a90ff'),
+        emissiveIntensity: 0.25,
+      });
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(3.6, 10, 8), mat);
+      bulb.position.set(cx + Math.cos(a) * 86, 40, cz + Math.sin(a) * 43);
+      this.stadiumChase.push(mat);
+      group.add(bulb);
+    }
+
+    // Five sport banners on the south face — the Crosstown ladder inserts.
+    // Tilted up so the high camera reads them.
+    SPORTS.forEach((s, i) => {
+      const a = Math.PI * (0.62 + i * 0.19); // fan across the front arc
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0x1a2436,
+        emissive: new THREE.Color(sportColor(s.id)),
+        emissiveIntensity: 0.12,
+      });
+      const banner = new THREE.Mesh(new THREE.BoxGeometry(20, 8, 2.4), mat);
+      const bx = cx + Math.cos(a) * 88;
+      const bz = cz + Math.sin(a) * 45;
+      banner.position.set(bx, 31, bz);
+      banner.lookAt(cx, 96, cz);
+      this.stadiumBanners.push(mat);
+      group.add(banner);
+    });
+
+    // Chrome standoffs — the same coordinates carry physics posts in the
+    // Playfield, so the ball collides with what it sees.
+    for (const [px, pz] of [
+      [209, 570],
+      [331, 570],
+      [209, 630],
+      [331, 630],
+    ]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 5.5, 34, 12), this.chromeMat);
+      leg.position.set(px, 17, pz);
+      leg.castShadow = true;
+      group.add(leg);
+    }
+    this.scene.add(group);
+  }
+
+  /** Rails / posts / walls straight from the physics bodies — with black
+   *  rubber rings on the round posts. */
+  private buildWallsAndPosts(pf: Playfield) {
     for (const w of pf.walls) {
       if (w.kind === 'wood' || w.outline.length === 0) continue;
       const body = w.body;
       const radius = (body as unknown as { circleRadius?: number }).circleRadius;
       if (radius) {
-        const post = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 26, 16), railMat);
+        const post = new THREE.Mesh(
+          new THREE.CylinderGeometry(radius, radius, 26, 16),
+          this.railMat,
+        );
         post.position.set(body.position.x, 13, body.position.y);
         post.castShadow = true;
-        this.scene.add(post);
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(radius + 0.6, 2, 8, 16),
+          this.rubberMat,
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(body.position.x, 12, body.position.y);
+        this.scene.add(post, ring);
         continue;
       }
       const v = w.outline;
       if (v.length < 4) continue;
       const len = Math.hypot(v[1].x - v[0].x, v[1].y - v[0].y);
       const thick = Math.hypot(v[2].x - v[1].x, v[2].y - v[1].y);
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 22, thick), railMat);
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 22, thick), this.railMat);
       rail.position.set(body.position.x, 11, body.position.y);
       rail.rotation.y = -Math.atan2(v[1].y - v[0].y, v[1].x - v[0].x);
       rail.castShadow = true;
@@ -233,13 +609,23 @@ export class Renderer3D {
     for (const p of pf.postPositions) {
       const post = new THREE.Mesh(
         new THREE.CylinderGeometry(p.r ?? 5, (p.r ?? 5) + 1, 20, 14),
-        railMat,
+        this.railMat,
       );
       post.position.set(p.x, 10, p.y);
       post.castShadow = true;
-      this.scene.add(post);
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry((p.r ?? 5) + 0.6, 1.8, 8, 14),
+        this.rubberMat,
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(p.x, 10, p.y);
+      this.scene.add(post, ring);
     }
+  }
 
+  /** Slings, bumpers, Bean, scoops, drops, standups, captive, spinner,
+   *  flippers, plunger, apron. */
+  private buildToys(pf: Playfield) {
     // Slingshots — white flag-plastic prisms.
     for (const s of pf.slingshots) {
       const shape = new THREE.Shape();
@@ -266,7 +652,7 @@ export class Renderer3D {
     for (const b of pf.popBumpers) {
       const base = new THREE.Mesh(
         new THREE.CylinderGeometry(b.radius, b.radius + 2, 14, 24),
-        railMat,
+        this.railMat,
       );
       base.position.set(b.body.position.x, 7, b.body.position.y);
       base.castShadow = true;
@@ -284,7 +670,8 @@ export class Renderer3D {
       this.scene.add(base, cap);
     }
 
-    // The Bean — squashed chrome sphere (Cloud Gate).
+    // The Bean — squashed chrome sphere (Cloud Gate); doubles as the
+    // Lake Shore multiball lock.
     const bean = new THREE.Mesh(
       new THREE.SphereGeometry(pf.bean.radius + 6, 48, 32),
       new THREE.MeshStandardMaterial({ color: 0xf2f5fa, metalness: 1, roughness: 0.06 }),
@@ -295,37 +682,7 @@ export class Renderer3D {
     this.beanMesh = bean;
     this.scene.add(bean);
 
-    // Ramps: translucent plastic tubes climbing, chrome return rails down.
-    const rampFor = (plate: Pt[], rail: Pt[], color: string) => {
-      const plateCurve = new THREE.CatmullRomCurve3(
-        plate.map((p, i) => toV3(p, 2 + (26 * Math.min(1, i / (plate.length - 2) + 0.1))))
-      );
-      const tube = new THREE.Mesh(
-        new THREE.TubeGeometry(plateCurve, 40, 11, 10, false),
-        new THREE.MeshPhysicalMaterial({
-          color: new THREE.Color(color),
-          transparent: true,
-          opacity: 0.45,
-          roughness: 0.25,
-          transmission: 0.4,
-        }),
-      );
-      this.scene.add(tube);
-      const railCurve = new THREE.CatmullRomCurve3(
-        rail.map((p, i) => toV3(p, 28 - 26 * Math.pow(i / (rail.length - 1), 1.6))),
-      );
-      const wire = new THREE.Mesh(new THREE.TubeGeometry(railCurve, 44, 2.2, 8, false), railMat);
-      this.scene.add(wire);
-    };
-    rampFor(pf.leftRamp.plate, pf.leftRamp.habitrail, COLOR.INSERT_AMBER);
-    rampFor(pf.rightRamp.plate, pf.rightRamp.habitrail, COLOR.INSERT_CYAN);
-    // Shooter wireform.
-    const shooter = new THREE.CatmullRomCurve3(
-      pf.shooterPath(pf.rolloverXs[1]).map((p, i, arr) => toV3(p, 26 - 22 * (i / (arr.length - 1)))),
-    );
-    this.scene.add(new THREE.Mesh(new THREE.TubeGeometry(shooter, 30, 2.2, 8, false), railMat));
-
-    // Scoops: dark hole + metal ring.
+    // Scoops: dark kickout hole + metal ring.
     for (const sc of [pf.lakeMichiganScoop, pf.cityTourScoop]) {
       const hole = new THREE.Mesh(
         new THREE.CircleGeometry(15, 24),
@@ -333,7 +690,7 @@ export class Renderer3D {
       );
       hole.rotation.x = -Math.PI / 2;
       hole.position.set(sc.x, 0.6, sc.y);
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(15, 2.4, 10, 28), railMat);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(15, 2.4, 10, 28), this.railMat);
       ring.rotation.x = -Math.PI / 2;
       ring.position.set(sc.x, 2, sc.y);
       this.scene.add(hole, ring);
@@ -406,8 +763,8 @@ export class Renderer3D {
     plunger.position.set(pf.plunger.body.position.x, 10, pf.plunger.body.position.y);
     this.scene.add(plunger);
 
-    // Apron — a painted sloped panel covering the whole drain area (the
-    // shooter lane to its right stays open so the ball is visible at rest).
+    // Apron — painted sloped panel covering the drain (the shooter lane to
+    // its right stays open so the ball is visible at rest).
     const apronCanvas = document.createElement('canvas');
     apronCanvas.width = 960;
     apronCanvas.height = 160;
@@ -418,35 +775,463 @@ export class Renderer3D {
       new THREE.PlaneGeometry(PLAYFIELD_W - 60, 78),
       new THREE.MeshStandardMaterial({ map: apronTex, roughness: 0.55, metalness: 0.1 }),
     );
-    // Horizontal, then tipped up toward the player like a real apron.
     apron.rotation.x = -Math.PI / 2 + 0.3;
     apron.position.set(PLAYFIELD_W / 2 - 30, 14, PLAYFIELD_H - 42);
     this.scene.add(apron);
+  }
 
-    // Backbox: marquee panel + DMD panel.
-    const marqueeCanvas = document.createElement('canvas');
-    marqueeCanvas.width = 1080;
-    marqueeCanvas.height = 240;
-    this.paintMarquee(marqueeCanvas.getContext('2d')!);
-    const marqueeTex = new THREE.CanvasTexture(marqueeCanvas);
-    marqueeTex.colorSpace = THREE.SRGBColorSpace;
-    const marquee = new THREE.Mesh(
-      new THREE.PlaneGeometry(PLAYFIELD_W + 40, 132),
-      new THREE.MeshBasicMaterial({ map: marqueeTex }),
-    );
-    marquee.position.set(PLAYFIELD_W / 2, 152, 110.5);
-    this.scene.add(marquee);
-    const dmdPanel = new THREE.Mesh(
-      new THREE.PlaneGeometry(PLAYFIELD_W - 20, 64),
-      new THREE.MeshBasicMaterial({ map: this.dmdTexture }),
-    );
-    // Sits proud of the backbox face — a tilt any larger buries the top
-    // edge inside the cabinet and the camera clips the first dot rows.
-    dmdPanel.position.set(PLAYFIELD_W / 2, 48, 113);
-    dmdPanel.rotation.x = -0.06;
-    this.scene.add(dmdPanel);
+  /** Molded acrylic ramp channels + true chrome wireform returns with
+   *  crossbars, support posts and under-ramp LED strips. */
+  private buildRampsAndWireforms(pf: Playfield) {
+    const rampSpec = [
+      { ramp: pf.leftRamp, led: '#ff3a4f' },
+      { ramp: pf.rightRamp, led: '#2a6cff' },
+    ];
+    for (const { ramp, led } of rampSpec) {
+      const n = ramp.plate.length;
+      const pts = ramp.plate.map((p, i) =>
+        toV3(p, 2 + 24 * Math.min(1, i / (n - 2) + 0.08)),
+      );
+      this.scene.add(this.acrylicChannel(pts, 26, 13));
+      // Under-ramp LED strip.
+      const ledCurve = new THREE.CatmullRomCurve3(
+        pts.map((p) => new THREE.Vector3(p.x, Math.max(1.2, p.y - 3), p.z)),
+      );
+      this.scene.add(
+        new THREE.Mesh(
+          new THREE.TubeGeometry(ledCurve, 40, 1.4, 6, false),
+          new THREE.MeshBasicMaterial({ color: new THREE.Color(led) }),
+        ),
+      );
+      // Support posts where the channel is high (over quiet floor).
+      for (const i of [Math.floor(n * 0.55), n - 2]) {
+        const p = pts[i];
+        const post = new THREE.Mesh(
+          new THREE.CylinderGeometry(1.6, 1.6, p.y, 8),
+          this.chromeMat,
+        );
+        post.position.set(p.x, p.y / 2, p.z);
+        this.scene.add(post);
+      }
+      // Wireform return: twin chrome rails + crossbar rings.
+      const hn = ramp.habitrail.length;
+      const railPts = ramp.habitrail.map((p, i) =>
+        toV3(p, 28 - 26 * Math.pow(i / (hn - 1), 1.6)),
+      );
+      this.scene.add(this.wireform(railPts));
+    }
 
-    // Lamp inserts — real emissive discs on the wood.
+    // Shooter-lane wireform across the back.
+    const shooterPts = pf
+      .shooterPath(pf.rolloverXs[1])
+      .map((p, i, arr) => toV3(p, 26 - 22 * (i / (arr.length - 1))));
+    this.scene.add(this.wireform(shooterPts));
+  }
+
+  /** Twin parallel chrome tubes with crossbar rings — a real habitrail. */
+  private wireform(pts: THREE.Vector3[]): THREE.Group {
+    const group = new THREE.Group();
+    const curve = new THREE.CatmullRomCurve3(pts);
+    for (const off of [-3.2, 3.2]) {
+      // Sample the base curve and push each point sideways in the xz plane.
+      const offsetPts: THREE.Vector3[] = [];
+      for (let i = 0; i <= 40; i++) {
+        const t = i / 40;
+        const p = curve.getPoint(t);
+        const tan = curve.getTangent(t);
+        const px = -tan.z;
+        const pz = tan.x;
+        const len = Math.hypot(px, pz) || 1;
+        offsetPts.push(
+          new THREE.Vector3(p.x + (px / len) * off, p.y, p.z + (pz / len) * off),
+        );
+      }
+      group.add(
+        new THREE.Mesh(
+          new THREE.TubeGeometry(new THREE.CatmullRomCurve3(offsetPts), 48, 1.4, 6, false),
+          this.chromeMat,
+        ),
+      );
+    }
+    // Crossbar half-rings every few segments.
+    const ringGeo = new THREE.TorusGeometry(4.4, 0.7, 6, 10, Math.PI);
+    const count = 9;
+    const rings = new THREE.InstancedMesh(ringGeo, this.chromeMat, count);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    for (let i = 0; i < count; i++) {
+      const t = (i + 0.5) / count;
+      const p = curve.getPoint(t);
+      const tan = curve.getTangent(t).normalize();
+      q.setFromUnitVectors(new THREE.Vector3(0, 0, 1), tan);
+      m.compose(new THREE.Vector3(p.x, p.y, p.z), q, new THREE.Vector3(1, 1, 1));
+      rings.setMatrixAt(i, m);
+    }
+    void up;
+    group.add(rings);
+    return group;
+  }
+
+  /** Transparent U-channel (floor + two side walls) along a path. */
+  private acrylicChannel(pts: THREE.Vector3[], width: number, wallH: number): THREE.Group {
+    const group = new THREE.Group();
+    const curve = new THREE.CatmullRomCurve3(pts);
+    const N = 40;
+    const half = width / 2;
+    const floorPos: number[] = [];
+    const leftPos: number[] = [];
+    const rightPos: number[] = [];
+    let prevL: THREE.Vector3 | null = null;
+    let prevR: THREE.Vector3 | null = null;
+    for (let i = 0; i <= N; i++) {
+      const t = i / N;
+      const p = curve.getPoint(t);
+      const tan = curve.getTangent(t);
+      const px = -tan.z;
+      const pz = tan.x;
+      const len = Math.hypot(px, pz) || 1;
+      const L = new THREE.Vector3(p.x + (px / len) * half, p.y, p.z + (pz / len) * half);
+      const R = new THREE.Vector3(p.x - (px / len) * half, p.y, p.z - (pz / len) * half);
+      if (prevL && prevR) {
+        // Floor strip (two triangles).
+        floorPos.push(prevL.x, prevL.y, prevL.z, prevR.x, prevR.y, prevR.z, L.x, L.y, L.z);
+        floorPos.push(prevR.x, prevR.y, prevR.z, R.x, R.y, R.z, L.x, L.y, L.z);
+        // Side walls.
+        for (const [arr, a, b] of [
+          [leftPos, prevL, L] as const,
+          [rightPos, prevR, R] as const,
+        ]) {
+          arr.push(a.x, a.y, a.z, b.x, b.y, b.z, a.x, a.y + wallH, a.z);
+          arr.push(b.x, b.y, b.z, b.x, b.y + wallH, b.z, a.x, a.y + wallH, a.z);
+        }
+      }
+      prevL = L;
+      prevR = R;
+    }
+    const acrylic = new THREE.MeshPhysicalMaterial({
+      color: 0xd8ecff,
+      transparent: true,
+      opacity: 0.28,
+      roughness: 0.08,
+      metalness: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    for (const arr of [floorPos, leftPos, rightPos]) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+      geo.computeVertexNormals();
+      group.add(new THREE.Mesh(geo, acrylic));
+    }
+    return group;
+  }
+
+  /** The five modeled sports attractions, placed at their shots. */
+  private buildAttractions(pf: Playfield) {
+    this.buildBaseball();
+    this.buildHockey();
+    this.buildFootball();
+    this.buildBasketball(pf);
+    this.buildSoccer(pf);
+  }
+
+  /** Raised plastic panel on thin chrome legs. */
+  private raisedPanel(
+    x: number,
+    z: number,
+    w: number,
+    d: number,
+    y: number,
+    paint: (ctx: CanvasRenderingContext2D, w: number, h: number) => void,
+  ): THREE.Group {
+    const group = new THREE.Group();
+    const c = document.createElement('canvas');
+    c.width = w * 4;
+    c.height = d * 4;
+    const ctx = c.getContext('2d')!;
+    ctx.scale(4, 4);
+    paint(ctx, w, d);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const plate = new THREE.Mesh(
+      new THREE.BoxGeometry(w, 2.5, d),
+      new THREE.MeshStandardMaterial({ map: tex, roughness: 0.4 }),
+    );
+    plate.position.set(x, y, z);
+    plate.castShadow = true;
+    group.add(plate);
+    for (const [lx, lz] of [
+      [x - w / 2 + 4, z - d / 2 + 4],
+      [x + w / 2 - 4, z + d / 2 - 4],
+    ]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.8, y, 8), this.chromeMat);
+      leg.position.set(lx, y / 2, lz);
+      group.add(leg);
+    }
+    return group;
+  }
+
+  /** BASEBALL — miniature diamond panel + swinging bat over the left ramp. */
+  private buildBaseball() {
+    const group = this.raisedPanel(136, 264, 62, 52, 40, (ctx, w, h) => {
+      ctx.fillStyle = '#2e7d3a'; // outfield grass
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#c9925a'; // infield dirt
+      ctx.beginPath();
+      ctx.moveTo(w / 2, h - 6);
+      ctx.lineTo(w - 10, h / 2);
+      ctx.lineTo(w / 2, 6);
+      ctx.lineTo(10, h / 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#f5fbff';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+      // Bases.
+      ctx.fillStyle = '#f5fbff';
+      for (const [bx, by] of [
+        [w / 2, h - 8],
+        [w - 12, h / 2],
+        [w / 2, 8],
+        [12, h / 2],
+      ]) {
+        ctx.fillRect(bx - 2, by - 2, 4, 4);
+      }
+      ctx.fillStyle = '#c9925a';
+      ctx.beginPath();
+      ctx.arc(w / 2, h / 2, 4, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    // Swinging bat at home plate.
+    const bat = new THREE.Group();
+    const stick = new THREE.Mesh(
+      new THREE.CapsuleGeometry(1.6, 16, 4, 8),
+      new THREE.MeshStandardMaterial({ color: 0xc9925a, roughness: 0.5 }),
+    );
+    stick.rotation.z = Math.PI / 2;
+    stick.position.x = 9;
+    bat.add(stick);
+    bat.position.set(136, 43.5, 284);
+    this.batGroup = bat;
+    group.add(bat);
+    const ball = new THREE.Mesh(
+      new THREE.SphereGeometry(2.2, 10, 8),
+      new THREE.MeshStandardMaterial({ color: 0xf5fbff, roughness: 0.4 }),
+    );
+    ball.position.set(136, 43.5, 254);
+    group.add(ball);
+    // Diamond flash lamp under the panel.
+    const flashMat = new THREE.MeshStandardMaterial({
+      color: 0x223048,
+      emissive: new THREE.Color('#ff3a4f'),
+      emissiveIntensity: 0.12,
+    });
+    const flash = new THREE.Mesh(new THREE.SphereGeometry(3.2, 10, 8), flashMat);
+    flash.position.set(136, 8, 240);
+    this.diamondFlashMat = flashMat;
+    group.add(flash);
+    this.scene.add(group);
+  }
+
+  /** HOCKEY — ice panel, goal cage, puck and a real goal light. */
+  private buildHockey() {
+    const group = this.raisedPanel(404, 260, 62, 50, 40, (ctx, w, h) => {
+      ctx.fillStyle = '#dcecf8'; // ice
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = '#d33'; // center line + circles
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(0, h / 2);
+      ctx.lineTo(w, h / 2);
+      ctx.stroke();
+      ctx.strokeStyle = '#36c';
+      ctx.beginPath();
+      ctx.arc(w / 2, h / 2, 8, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(60,100,160,0.5)';
+      ctx.strokeRect(1, 1, w - 2, h - 2);
+    });
+    // Goal cage: red frame + translucent net.
+    const goal = new THREE.Group();
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0xd62a3e, roughness: 0.4 });
+    for (const [gx, gz] of [
+      [-9, 0],
+      [9, 0],
+    ]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 10, 8), frameMat);
+      post.position.set(gx, 5, gz);
+      goal.add(post);
+    }
+    const crossbar = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 18, 8), frameMat);
+    crossbar.rotation.z = Math.PI / 2;
+    crossbar.position.y = 10;
+    goal.add(crossbar);
+    const net = new THREE.Mesh(
+      new THREE.PlaneGeometry(18, 10),
+      new THREE.MeshStandardMaterial({
+        color: 0xf5fbff,
+        transparent: true,
+        opacity: 0.4,
+        side: THREE.DoubleSide,
+      }),
+    );
+    net.rotation.x = 0.5;
+    net.position.set(0, 5.4, -3.4);
+    goal.add(net);
+    goal.position.set(404, 41.2, 246);
+    group.add(goal);
+    // Puck.
+    const puck = new THREE.Mesh(
+      new THREE.CylinderGeometry(3, 3, 1.6, 14),
+      new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.6 }),
+    );
+    puck.position.set(404, 42.4, 268);
+    this.puckMesh = puck;
+    group.add(puck);
+    // Rotating goal light on a pole behind the cage.
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 14, 8), this.chromeMat);
+    pole.position.set(422, 47, 242);
+    group.add(pole);
+    const lampMat = new THREE.MeshStandardMaterial({
+      color: 0x300a10,
+      emissive: new THREE.Color('#ff2030'),
+      emissiveIntensity: 0.15,
+    });
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(3.4, 12, 8), lampMat);
+    dome.position.set(422, 55, 242);
+    this.hockeyLampMat = lampMat;
+    group.add(dome);
+    this.scene.add(group);
+  }
+
+  /** FOOTBALL — turf strip up the left orbit with raised goalposts the
+   *  return wireform threads through. */
+  private buildFootball() {
+    const group = new THREE.Group();
+    const postMat = new THREE.MeshStandardMaterial({
+      color: 0xf2c744,
+      roughness: 0.4,
+      emissive: new THREE.Color('#f2c744'),
+      emissiveIntensity: 0.1,
+    });
+    this.footballPostMat = postMat;
+    // Single base at the wall, gooseneck out over the lane.
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 40, 8), postMat);
+    base.position.set(8, 20, 352);
+    group.add(base);
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 18, 8), postMat);
+    neck.rotation.z = Math.PI / 2;
+    neck.position.set(17, 40, 352);
+    group.add(neck);
+    const crossbar = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 30, 8), postMat);
+    crossbar.rotation.x = Math.PI / 2;
+    crossbar.position.set(26, 40, 352);
+    group.add(crossbar);
+    for (const uz of [337, 367]) {
+      const upright = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 30, 8), postMat);
+      upright.position.set(26, 55, uz);
+      group.add(upright);
+    }
+    this.scene.add(group);
+  }
+
+  /** BASKETBALL — backboard, rim and net above the shooter-lane divider;
+   *  the right-ramp shot "swishes" it. */
+  private buildBasketball(pf: Playfield) {
+    void pf;
+    const group = new THREE.Group();
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.8, 54, 10), this.chromeMat);
+    pole.position.set(486, 27, 396);
+    group.add(pole);
+    // Backboard with painted square.
+    const c = document.createElement('canvas');
+    c.width = 96;
+    c.height = 72;
+    const bctx = c.getContext('2d')!;
+    bctx.fillStyle = 'rgba(235,244,255,0.92)';
+    bctx.fillRect(0, 0, 96, 72);
+    bctx.strokeStyle = '#d62a3e';
+    bctx.lineWidth = 5;
+    bctx.strokeRect(30, 26, 36, 30);
+    bctx.strokeRect(3, 3, 90, 66);
+    const btex = new THREE.CanvasTexture(c);
+    btex.colorSpace = THREE.SRGBColorSpace;
+    const board = new THREE.Mesh(
+      new THREE.BoxGeometry(24, 18, 1.6),
+      new THREE.MeshStandardMaterial({ map: btex, roughness: 0.3 }),
+    );
+    board.position.set(486, 52, 390);
+    board.rotation.y = Math.PI; // faces up-table
+    group.add(board);
+    // Rim + net.
+    const rim = new THREE.Mesh(
+      new THREE.TorusGeometry(5, 0.8, 8, 18),
+      new THREE.MeshStandardMaterial({ color: 0xff6a2a, roughness: 0.35, metalness: 0.4 }),
+    );
+    rim.rotation.x = -Math.PI / 2;
+    rim.position.set(486, 45, 383);
+    group.add(rim);
+    const netMat = new THREE.MeshStandardMaterial({
+      color: 0xf5fbff,
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.DoubleSide,
+      emissive: new THREE.Color('#f5fbff'),
+      emissiveIntensity: 0.05,
+      wireframe: true,
+    });
+    this.basketNetMat = netMat;
+    const net = new THREE.Mesh(new THREE.CylinderGeometry(5, 3.4, 9, 10, 3, true), netMat);
+    net.position.set(486, 40, 383);
+    group.add(net);
+    this.scene.add(group);
+  }
+
+  /** SOCCER — goal frame + net wrapped around the MODE scoop, so shots
+   *  into the scoop bury themselves in the back of the net. */
+  private buildSoccer(pf: Playfield) {
+    const sx = pf.cityTourScoop.x;
+    const sz = pf.cityTourScoop.y;
+    const group = new THREE.Group();
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0xf5fbff, roughness: 0.35 });
+    for (const gx of [sx - 21, sx + 21]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 18, 8), frameMat);
+      post.position.set(gx, 9, sz + 10);
+      group.add(post);
+    }
+    const crossbar = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 43, 8), frameMat);
+    crossbar.rotation.z = Math.PI / 2;
+    crossbar.position.set(sx, 18, sz + 10);
+    group.add(crossbar);
+    const net = new THREE.Mesh(
+      new THREE.PlaneGeometry(42, 22),
+      new THREE.MeshStandardMaterial({
+        color: 0xf5fbff,
+        transparent: true,
+        opacity: 0.35,
+        side: THREE.DoubleSide,
+        wireframe: true,
+      }),
+    );
+    net.rotation.x = -0.9;
+    net.position.set(sx, 10, sz + 19);
+    group.add(net);
+    // Green goal lamp.
+    const lampMat = new THREE.MeshStandardMaterial({
+      color: 0x0a2a14,
+      emissive: new THREE.Color('#5cff9a'),
+      emissiveIntensity: 0.15,
+    });
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(2.8, 10, 8), lampMat);
+    lamp.position.set(sx + 26, 20, sz + 12);
+    this.soccerLampMat = lampMat;
+    group.add(lamp);
+    this.scene.add(group);
+  }
+
+  /** Lamp inserts — real emissive discs on the wood. */
+  private buildLamps(pf: Playfield) {
     const lamp = (
       x: number,
       z: number,
@@ -465,20 +1250,40 @@ export class Renderer3D {
       this.lamps.push({ mesh, mat, kind });
     };
     pf.rollovers.forEach((r, i) => lamp(r.x, r.y, 8, '#5cff9a', { t: 'rollover', i }));
-    // CHICAGO letter inserts run across the open floor above the flag
-    // banner (the top apron already carries the SKILL SHOT decal).
+    // CHICAGO letter inserts above the stadium.
     for (let i = 0; i < CHICAGO.length; i++) {
       lamp(PLAYFIELD_W / 2 - ((CHICAGO.length - 1) * 26) / 2 + i * 26, 528, 8, '#e6293e', {
         t: 'chicago',
         i,
       });
     }
-    for (let i = 0; i < 5; i++) {
-      lamp(PLAYFIELD_W / 2 - 42, 642 + i * 15, 5, '#e6293e', { t: 'tour', i });
-    }
+    // One arrow insert per sport, at its shot.
+    const sportInsertPos: Array<[number, number]> = [
+      [155, 598], // baseball — left ramp mouth
+      [pf.loopArrowXs[0], 622], // football — left orbit
+      [325, 598], // basketball — right ramp mouth
+      [pf.loopArrowXs[1], 622], // hockey — right orbit
+      [pf.cityTourScoop.x, pf.cityTourScoop.y + 44], // soccer — the scoop
+    ];
+    SPORTS.forEach((s, i) => {
+      const [x, z] = sportInsertPos[i];
+      lamp(x, z, 7, sportColor(s.id), { t: 'sport', i });
+    });
     lamp(pf.kickbackPos.x, pf.kickbackPos.y - 8, 6, '#5cff9a', { t: 'kickback' });
     lamp(pf.lakeMichiganScoop.x, pf.lakeMichiganScoop.y - 34, 7, '#4ea0d8', { t: 'mystery' });
     pf.loopArrowXs.forEach((x, i) => lamp(x, 590, 8, '#7fd1e8', { t: 'loop', i }));
+  }
+
+  /** ?debug — show collision geometry as red wireframes. */
+  private buildDebug(pf: Playfield) {
+    const mat = new THREE.LineBasicMaterial({ color: 0xff2040 });
+    for (const w of pf.walls) {
+      if (w.outline.length < 3) continue;
+      const geo = new THREE.BufferGeometry().setFromPoints(
+        [...w.outline, w.outline[0]].map((p) => new THREE.Vector3(p.x, 24, p.y)),
+      );
+      this.scene.add(new THREE.Line(geo, mat));
+    }
   }
 
   private makeBallMesh(r = BALL_RADIUS): THREE.Mesh {
@@ -488,6 +1293,55 @@ export class Renderer3D {
     );
     mesh.castShadow = true;
     return mesh;
+  }
+
+  // ── Painted panels ───────────────────────────────────────────────────────
+
+  /** Sport-zone artwork blended into the playfield print. */
+  private paintSportsZones(ctx: CanvasRenderingContext2D, pf: Playfield) {
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+
+    // Football turf up the left orbit.
+    ctx.fillStyle = '#1d5c2c';
+    ctx.fillRect(8, 300, 34, 130);
+    ctx.strokeStyle = 'rgba(245,251,255,0.75)';
+    ctx.lineWidth = 1.4;
+    for (let i = 0; i <= 6; i++) {
+      const y = 308 + i * 19;
+      ctx.beginPath();
+      ctx.moveTo(10, y);
+      ctx.lineTo(40, y);
+      ctx.stroke();
+    }
+    // End zone.
+    ctx.fillStyle = 'rgba(230,41,62,0.8)';
+    ctx.fillRect(8, 300, 34, 12);
+
+    // Soccer pitch surrounding the MODE scoop.
+    const sx = pf.cityTourScoop.x;
+    const sy = pf.cityTourScoop.y;
+    ctx.fillStyle = '#1d5c2c';
+    ctx.fillRect(sx - 42, sy - 30, 84, 62);
+    ctx.strokeStyle = 'rgba(245,251,255,0.75)';
+    ctx.strokeRect(sx - 38, sy - 26, 76, 54);
+    ctx.strokeRect(sx - 20, sy + 4, 40, 24); // goal box around the scoop
+    ctx.beginPath();
+    ctx.arc(sx, sy - 26, 9, 0, Math.PI);
+    ctx.stroke();
+
+    // Hardwood court pad under the basketball hoop (shooter-lane edge).
+    ctx.fillStyle = '#b07840';
+    ctx.fillRect(452, 380, 64, 52);
+    ctx.strokeStyle = 'rgba(245,251,255,0.8)';
+    ctx.beginPath();
+    ctx.arc(486, 392, 20, 0, Math.PI);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(214,42,62,0.9)';
+    ctx.strokeRect(452, 380, 64, 52);
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   private paintMarquee(ctx: CanvasRenderingContext2D) {
@@ -502,7 +1356,7 @@ export class Renderer3D {
     // Star sprinkle.
     for (let i = 0; i < 60; i++) {
       ctx.fillStyle = `rgba(255,255,255,${0.15 + ((i * 37) % 10) / 25})`;
-      ctx.fillRect(((i * 97) % 540), ((i * 61) % 40) + (i % 2 ? 82 : 2), 1.4, 1.4);
+      ctx.fillRect((i * 97) % 540, ((i * 61) % 40) + (i % 2 ? 82 : 2), 1.4, 1.4);
     }
     const mx = W / 2;
     ctx.fillStyle = '#0a0d18';
@@ -546,15 +1400,12 @@ export class Renderer3D {
     g.addColorStop(1, '#24060c');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
-    // Double gold pinstripe border.
     ctx.strokeStyle = COLOR.BRASS;
     ctx.lineWidth = 2;
     ctx.strokeRect(6, 6, W - 12, H - 12);
     ctx.lineWidth = 1;
     ctx.strokeStyle = 'rgba(217,164,65,0.5)';
     ctx.strokeRect(11, 11, W - 22, H - 22);
-    // Instruction cards left and right of the drain — inset enough that the
-    // camera's widening near-field doesn't crop them at the frame edges.
     for (const cx of [132, W - 132]) {
       ctx.fillStyle = '#e8e2d0';
       ctx.fillRect(cx - 42, 20, 84, 42);
@@ -565,13 +1416,11 @@ export class Renderer3D {
       ctx.font = 'bold 8px "Helvetica Neue", Arial, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(cx < W / 2 ? 'FREE PLAY' : '3 BALLS', cx, 30);
-      // Faux fine print.
       ctx.fillStyle = 'rgba(40,40,50,0.55)';
       for (let ln = 0; ln < 4; ln++) {
         ctx.fillRect(cx - 34, 36 + ln * 6, 68 - ((ln * 23) % 20), 2);
       }
     }
-    // Center badge.
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     (ctx as unknown as { letterSpacing?: string }).letterSpacing = '3px';
@@ -591,6 +1440,7 @@ export class Renderer3D {
 
   draw(pf: Playfield, hud: HudInfo) {
     if (!this.built) this.buildTable(pf);
+    const now = performance.now();
 
     // Balls: pool meshes against live bodies.
     const seen = new Set<Matter.Body>();
@@ -643,20 +1493,10 @@ export class Renderer3D {
       this.beanMesh.scale.set(1.25 * s, 0.8 * s, s);
     }
 
-    // Lamps.
-    const blink = Math.sin(performance.now() / 180) > -0.2;
-    for (const l of this.lamps) {
-      let on = false;
-      const k = l.kind;
-      if (k.t === 'rollover') on = pf.rollovers[k.i].lit;
-      else if (k.t === 'chicago') on = pf.bank.litMask()[k.i];
-      else if (k.t === 'tour') on = hud.tourIdx > k.i || (hud.tourIdx === k.i && blink);
-      else if (k.t === 'kickback') on = hud.kickbackLit && blink;
-      else if (k.t === 'mystery') on = hud.mysteryLit;
-      else if (k.t === 'loop')
-        on = (hud.multiball || hud.bossActive || hud.tourKind === 'loop') && blink;
-      l.mat.emissiveIntensity = on ? 2.2 : 0.1;
-    }
+    this.animateTrain(hud);
+    this.animateStadium(hud, now);
+    this.animateSports(now);
+    this.updateLamps(pf, hud, now);
 
     // Camera shake.
     const baseX = PLAYFIELD_W / 2;
@@ -681,16 +1521,112 @@ export class Renderer3D {
     this.drawOverlay(pf, hud);
   }
 
-  /** Same display logic as the 2D renderer's HUD band. */
+  /** The L: one lap around the skyline, driven by the game clock. */
+  private animateTrain(hud: HudInfo) {
+    const running = hud.trainPhase >= 0 && this.trainCurve;
+    for (let i = 0; i < this.trainCars.length; i++) {
+      const car = this.trainCars[i];
+      car.visible = !!running;
+      if (!running) continue;
+      const t = (hud.trainPhase + 1 - i * 0.045) % 1;
+      const p = this.trainCurve!.getPoint(t);
+      const tan = this.trainCurve!.getTangent(t);
+      car.position.set(p.x, p.y + 4, p.z);
+      car.rotation.y = Math.atan2(-tan.z, tan.x);
+    }
+    if (this.trainLight) {
+      this.trainLight.visible = !!running;
+      if (running) {
+        const p = this.trainCurve!.getPoint(hud.trainPhase);
+        this.trainLight.position.set(p.x, p.y - 6, p.z + 6);
+      }
+    }
+  }
+
+  /** Stadium: chase lights spin (fast in a wizard mode), banners burn for
+   *  completed sports and blink for the running one. */
+  private animateStadium(hud: HudInfo, now: number) {
+    const fast = hud.crosstownActive || hud.bossActive;
+    const step = Math.floor(now / (fast ? 70 : 240));
+    this.stadiumChase.forEach((mat, i) => {
+      const on = (step + i) % 12 < (fast ? 5 : 3);
+      mat.emissiveIntensity = on ? 2.4 : 0.15;
+    });
+    const blink = Math.sin(now / 160) > -0.1;
+    this.stadiumBanners.forEach((mat, i) => {
+      const active =
+        hud.activeSport === i || (hud.crosstownActive && hud.crosstownLeft.includes(i));
+      mat.emissiveIntensity = hud.sportsDone[i] ? 1.9 : active && blink ? 2.4 : 0.12;
+    });
+  }
+
+  /** Attraction FX driven by the sportFx timers. */
+  private animateSports(now: number) {
+    const fx = this.sportFx;
+    // Baseball: bat swing + diamond flash.
+    if (this.batGroup) {
+      const f = fx[0];
+      this.batGroup.rotation.y = f > 0 ? Math.sin(((900 - f) / 900) * Math.PI) * 2.4 : 0;
+    }
+    if (this.diamondFlashMat) {
+      this.diamondFlashMat.emissiveIntensity = fx[0] > 0 ? 2.6 : 0.12;
+    }
+    // Football posts flash.
+    if (this.footballPostMat) {
+      this.footballPostMat.emissiveIntensity = fx[1] > 0 ? 1.8 : 0.1;
+    }
+    // Basketball net glows on the swish.
+    if (this.basketNetMat) {
+      this.basketNetMat.emissiveIntensity = fx[2] > 0 ? 2.2 : 0.05;
+    }
+    // Hockey: goal light spins bright, puck twirls.
+    if (this.hockeyLampMat) {
+      this.hockeyLampMat.emissiveIntensity =
+        fx[3] > 0 ? 2.2 + Math.sin(now / 40) * 1.4 : 0.15;
+    }
+    if (this.puckMesh && fx[3] > 0) this.puckMesh.rotation.y += 0.5;
+    // Soccer lamp.
+    if (this.soccerLampMat) {
+      this.soccerLampMat.emissiveIntensity = fx[4] > 0 ? 2.4 : 0.15;
+    }
+  }
+
+  private updateLamps(pf: Playfield, hud: HudInfo, now: number) {
+    const blink = Math.sin(now / 180) > -0.2;
+    for (const l of this.lamps) {
+      let on = false;
+      const k = l.kind;
+      if (k.t === 'rollover') on = pf.rollovers[k.i].lit;
+      else if (k.t === 'chicago') on = pf.bank.litMask()[k.i];
+      else if (k.t === 'sport') {
+        const active =
+          hud.activeSport === k.i || (hud.crosstownActive && hud.crosstownLeft.includes(k.i));
+        on = hud.sportsDone[k.i] || (active && blink);
+      } else if (k.t === 'kickback') on = hud.kickbackLit && blink;
+      else if (k.t === 'mystery') on = hud.mysteryLit;
+      else if (k.t === 'loop')
+        on = (hud.multiball || hud.bossActive || hud.modeKind === 'loop') && blink;
+      l.mat.emissiveIntensity = on ? 2.2 : 0.1;
+    }
+  }
+
+  /** DMD contents — mode-first priority, same logic as a real machine. */
   private composeDmd(hud: HudInfo) {
     const d = this.dmd;
     d.clear();
     if (hud.state === GameState.TITLE || hud.state === GameState.GAME_OVER) {
-      d.centerText(hud.state === GameState.TITLE ? 'CHICAGO PINBALL' : 'GAME OVER', 1);
+      d.centerText(hud.state === GameState.TITLE ? 'WINDY CITY SHOWDOWN' : 'GAME OVER', 1);
       const msgs =
         hud.state === GameState.TITLE
-          ? ['THE WINDY CITY', hud.highScore > 0 ? `HIGH SCORE ${hud.highScore.toLocaleString()}` : 'FREE PLAY', 'PRESS ENTER']
-          : [`FINAL ${Math.max(...hud.playerScores).toLocaleString()}`, hud.matched ? 'MATCH!' : 'PRESS ENTER'];
+          ? [
+              'CHICAGO SPORTS',
+              hud.highScore > 0 ? `HIGH SCORE ${hud.highScore.toLocaleString()}` : 'FREE PLAY',
+              'PRESS ENTER',
+            ]
+          : [
+              `FINAL ${Math.max(...hud.playerScores).toLocaleString()}`,
+              hud.matched ? 'MATCH!' : 'PRESS ENTER',
+            ];
       d.centerText(msgs[Math.floor(performance.now() / 2200) % msgs.length], 10);
       return;
     }
@@ -700,6 +1636,7 @@ export class Renderer3D {
     d.rightText(hud.score.toLocaleString(), 1);
     const latest = this.toasts[this.toasts.length - 1];
     const blink = Math.floor(performance.now() / 250) % 2 === 0;
+    const secs = (ms: number) => `${Math.max(0, Math.ceil(ms / 1000))}S`;
     if (latest && latest.total - latest.ttl < 2400) {
       if (latest.total - latest.ttl < 350 || blink || latest.total - latest.ttl > 900) {
         d.centerText(latest.text, 10);
@@ -707,11 +1644,14 @@ export class Renderer3D {
     } else if (hud.bossActive) {
       d.capone(2, 8);
       d.bar(17, 11, 74, 5, Math.max(0, hud.bossHp) / BOSS_HP);
-      d.rightText(`${Math.max(0, Math.ceil(hud.bossMsLeft / 1000))}S`, 10);
-    } else if (hud.tourName) {
-      d.centerText(`TOUR: ${hud.tourName} ${Math.max(0, Math.ceil(hud.tourMsLeft / 1000))}S`, 10);
+      d.rightText(secs(hud.bossMsLeft), 10);
+    } else if (hud.crosstownActive) {
+      d.centerText(`CROSSTOWN ${hud.crosstownLeft.length} LEFT ${secs(hud.modeMsLeft)}`, 10);
+    } else if (hud.activeSport >= 0) {
+      const s = SPORTS[hud.activeSport];
+      d.centerText(`${s.sport} ${hud.modeHits}/${hud.modeGoal} ${secs(hud.modeMsLeft)}`, 10);
     } else if (hud.multiball) {
-      if (blink) d.centerText('MULTIBALL', 10);
+      if (blink) d.centerText('LAKE SHORE MULTIBALL', 10);
     } else if (hud.tilted) {
       if (blink) d.centerText('TILT', 10);
     } else if (hud.tiltHeat >= 2) {
@@ -720,7 +1660,10 @@ export class Renderer3D {
       if (blink) d.centerText('SHOWDOWN AT THE SCOOP', 10);
     } else if (hud.playerScores.length > 1) {
       const strip = hud.playerScores
-        .map((s, i) => `${i === hud.currentPlayer ? '*' : ''}P${i + 1} ${s >= 10000 ? Math.floor(s / 1000) + 'K' : s}`)
+        .map(
+          (s, i) =>
+            `${i === hud.currentPlayer ? '*' : ''}P${i + 1} ${s >= 10000 ? Math.floor(s / 1000) + 'K' : s}`,
+        )
         .join('  ');
       d.centerText(strip, 10);
     } else if (hud.bonusX > 1) {
@@ -747,44 +1690,56 @@ export class Renderer3D {
       ctx.fillRect(0, 130, PLAYFIELD_W, PLAYFIELD_H - 130);
       ctx.strokeStyle = COLOR.BRASS;
       ctx.lineWidth = 1.5;
-      for (const y of [332, 338, 452, 458]) {
+      for (const y of [318, 324, 452, 458]) {
         ctx.beginPath();
         ctx.moveTo(y > 400 ? 120 : 80, y);
         ctx.lineTo(PLAYFIELD_W - (y > 400 ? 120 : 80), y);
         ctx.stroke();
       }
-      (ctx as unknown as { letterSpacing?: string }).letterSpacing = '10px';
+      (ctx as unknown as { letterSpacing?: string }).letterSpacing = '8px';
       ctx.shadowColor = COLOR.FLAG_RED;
       ctx.shadowBlur = 26;
       ctx.fillStyle = COLOR.FLAG_RED;
-      ctx.font = 'bold 60px "Helvetica Neue", Arial, sans-serif';
-      ctx.fillText('CHICAGO', PLAYFIELD_W / 2 + 5, 386);
-      ctx.shadowBlur = 0;
-      (ctx as unknown as { letterSpacing?: string }).letterSpacing = '6px';
+      ctx.font = 'bold 52px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText('WINDY CITY', PLAYFIELD_W / 2 + 4, 366);
+      ctx.shadowColor = COLOR.FLAG_BLUE;
+      ctx.shadowBlur = 18;
       ctx.fillStyle = COLOR.FLAG_BLUE;
-      ctx.font = 'bold 18px "Helvetica Neue", Arial, sans-serif';
-      ctx.fillText('THE WINDY CITY PINBALL', PLAYFIELD_W / 2 + 3, 432);
+      ctx.font = 'bold 34px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText('SHOWDOWN', PLAYFIELD_W / 2 + 3, 414);
+      ctx.shadowBlur = 0;
+      (ctx as unknown as { letterSpacing?: string }).letterSpacing = '5px';
+      ctx.fillStyle = COLOR.TEXT;
+      ctx.font = 'bold 15px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText('CHICAGO SPORTS PINBALL', PLAYFIELD_W / 2 + 2, 444);
       (ctx as unknown as { letterSpacing?: string }).letterSpacing = '0px';
       ctx.fillStyle = COLOR.TEXT;
       ctx.font = '13px "Helvetica Neue", Arial, sans-serif';
-      ctx.fillText('LOCK 3 BALLS · SPELL CHICAGO · BEAT CAPONE', PLAYFIELD_W / 2, 486);
+      ctx.fillText('PLAY ALL 5 SPORTS · WIN THE CROSSTOWN · TAKE THE TITLE', PLAYFIELD_W / 2, 486);
+      // The five sports, spelled out.
+      ctx.fillStyle = COLOR.TEXT_DIM;
+      ctx.font = '11px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText(
+        SPORTS.map((s) => s.sport).join(' · '),
+        PLAYFIELD_W / 2,
+        510,
+      );
       if (hud.highScore > 0) {
         ctx.fillStyle = COLOR.TEXT_GOLD;
         ctx.font = 'bold 15px "Helvetica Neue", Arial, sans-serif';
-        ctx.fillText(`HIGH SCORE  ${hud.highScore.toLocaleString()}`, PLAYFIELD_W / 2, 522);
+        ctx.fillText(`HIGH SCORE  ${hud.highScore.toLocaleString()}`, PLAYFIELD_W / 2, 540);
       }
       if (Math.sin(performance.now() / 300) > 0) {
         ctx.shadowColor = COLOR.NEON_AMBER;
         ctx.shadowBlur = 14;
         ctx.fillStyle = COLOR.NEON_AMBER;
         ctx.font = 'bold 18px "Helvetica Neue", Arial, sans-serif';
-        ctx.fillText('PRESS ENTER TO START', PLAYFIELD_W / 2, 590);
+        ctx.fillText('PRESS ENTER TO START', PLAYFIELD_W / 2, 596);
         ctx.shadowBlur = 0;
       }
       ctx.fillStyle = COLOR.TEXT_DIM;
       ctx.font = '11px "Helvetica Neue", Arial, sans-serif';
-      ctx.fillText('Z / ⁄ flippers · SPACE plunger · C/N nudge · M mute', PLAYFIELD_W / 2, 630);
-      drawCapone(ctx, PLAYFIELD_W / 2, 762, 1.05, 0.95);
+      ctx.fillText('Z / ⁄ flippers · SPACE plunger · C/N nudge · M mute', PLAYFIELD_W / 2, 634);
       return;
     }
 
@@ -851,5 +1806,23 @@ export class Renderer3D {
       ctx.shadowBlur = 0;
     }
     void pf;
+  }
+}
+
+/** Insert / banner color for each sport. */
+function sportColor(id: string): string {
+  switch (id) {
+    case 'baseball':
+      return '#ff3a4f';
+    case 'football':
+      return '#f2c744';
+    case 'basketball':
+      return '#ff8c42';
+    case 'hockey':
+      return '#7fd1e8';
+    case 'soccer':
+      return '#5cff9a';
+    default:
+      return '#ffffff';
   }
 }

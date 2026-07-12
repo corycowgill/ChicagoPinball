@@ -37,12 +37,22 @@ export interface HudInfo {
   matched: boolean;
   plungerHolding: boolean;
   multiball: boolean;
-  tourName: string | null;
-  tourKind: string | null;
-  tourLetter: string | null;
-  tourMsLeft: number;
-  /** Index into the tour itinerary, -1 when no tour is running. */
-  tourIdx: number;
+  /** Index into SPORTS of the running mode, -1 when idle. */
+  activeSport: number;
+  /** Running mode banner (a sport mode or the Crosstown Championship). */
+  modeName: string | null;
+  modeKind: string | null;
+  modeLetter: string | null;
+  modeMsLeft: number;
+  modeHits: number;
+  modeGoal: number;
+  /** One flag per entry in SPORTS. */
+  sportsDone: boolean[];
+  crosstownActive: boolean;
+  /** Sport indices still needed during the Crosstown Championship. */
+  crosstownLeft: number[];
+  /** 0..1 while the L is running its lap, -1 while it's parked. */
+  trainPhase: number;
   tiltHeat: number;
   tilted: boolean;
   kickbackLit: boolean;
@@ -125,14 +135,13 @@ export class Renderer {
     // Static under-layer: top apron band, floor + art, lake pool, wireform.
     if (this.staticUnder) ctx.drawImage(this.staticUnder, 0, 0, PLAYFIELD_W, PLAYFIELD_H);
     this.drawChicagoStrip(ctx, pf);
-    this.drawTourLadder(ctx, hud);
     // Capone looms over the playfield during the showdown.
     if (hud.bossActive) drawCapone(ctx, pf.playCenter, 480, 1.9, 0.14);
     // Animated lake shimmer over the static pool.
     this.drawLakeShimmer(ctx, pf);
     // Ramps (raised translucent plates) — drawn before toys so toys layer on top.
-    pf.leftRamp.draw(ctx, hot || (hud.tourKind === 'ramp' && hud.tourLetter === 'L'));
-    pf.rightRamp.draw(ctx, hot || (hud.tourKind === 'ramp' && hud.tourLetter === 'R'));
+    pf.leftRamp.draw(ctx, hot || (hud.modeKind === 'ramp' && hud.modeLetter === 'L'));
+    pf.rightRamp.draw(ctx, hot || (hud.modeKind === 'ramp' && hud.modeLetter === 'R'));
     // Toys.
     pf.bank.draw(ctx);
     pf.captive.draw(ctx);
@@ -167,7 +176,7 @@ export class Renderer {
     }
 
     // Loop arrows pulse while their shot pays extra.
-    if ((hot || hud.tourKind === 'loop') && Math.sin(performance.now() / 120) > 0) {
+    if ((hot || hud.modeKind === 'loop') && Math.sin(performance.now() / 120) > 0) {
       ctx.save();
       ctx.strokeStyle = COLOR.FLAG_BLUE;
       ctx.shadowColor = COLOR.FLAG_BLUE;
@@ -213,23 +222,6 @@ export class Renderer {
       ctx.fillStyle = `rgba(180, 230, 255, ${0.55 + 0.4 * pulse})`;
       ctx.font = 'bold 16px "Helvetica Neue", Arial, sans-serif';
       ctx.fillText('?', pf.lakeMichiganScoop.x, pf.lakeMichiganScoop.y - 44);
-      ctx.restore();
-    }
-
-    // Tour-stop halos for the Bean / captive stops.
-    if ((hud.tourKind === 'bean' || hud.tourKind === 'captive') && Math.sin(performance.now() / 120) > 0) {
-      ctx.save();
-      ctx.strokeStyle = COLOR.INSERT_CYAN;
-      ctx.shadowColor = COLOR.INSERT_CYAN;
-      ctx.shadowBlur = 14;
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      if (hud.tourKind === 'bean') {
-        ctx.arc(pf.bean.cx, pf.bean.cy, pf.bean.radius + 10, 0, Math.PI * 2);
-      } else {
-        ctx.arc(pf.captive.x, pf.captive.y - 10, 32, 0, Math.PI * 2);
-      }
-      ctx.stroke();
       ctx.restore();
     }
 
@@ -1036,8 +1028,8 @@ export class Renderer {
       d.capone(2, 8);
       d.bar(17, 11, 74, 5, Math.max(0, hud.bossHp) / BOSS_HP);
       d.rightText(`${Math.max(0, Math.ceil(hud.bossMsLeft / 1000))}S`, 10);
-    } else if (hud.tourName) {
-      d.centerText(`TOUR: ${hud.tourName} ${Math.max(0, Math.ceil(hud.tourMsLeft / 1000))}S`, 10);
+    } else if (hud.modeName) {
+      d.centerText(`${hud.modeName} ${Math.max(0, Math.ceil(hud.modeMsLeft / 1000))}S`, 10);
     } else if (hud.multiball) {
       if (blink) d.centerText('MULTIBALL', 10);
     } else if (hud.tilted) {
@@ -1082,44 +1074,6 @@ export class Renderer {
       ctx.fillStyle = lit[i] ? '#123a6e' : 'rgba(160, 200, 235, 0.5)';
       ctx.font = 'bold 11px "Helvetica Neue", Arial, sans-serif';
       ctx.fillText(CHICAGO[i], x, cy + 0.5);
-    }
-    ctx.restore();
-  }
-
-  /** City Tour ladder — labelled inserts with star lamps, like the mode
-   *  ladder on the reference machine. Completed stops burn solid, the
-   *  current stop blinks. */
-  private drawTourLadder(ctx: CanvasRenderingContext2D, hud: HudInfo) {
-    const names = ['WILLIS', 'THE L', 'PIER', 'BEAN', 'WRIGLEY'];
-    const x = PLAYFIELD_W / 2 - 34;
-    const y0 = 636;
-    const blink = Math.sin(performance.now() / 180) > -0.2;
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    for (let i = 0; i < names.length; i++) {
-      const y = y0 + i * 15;
-      const done = hud.tourIdx > i;
-      const current = hud.tourIdx === i;
-      // Insert plate.
-      ctx.fillStyle = current && blink ? 'rgba(240, 246, 255, 0.34)' : 'rgba(235, 242, 250, 0.10)';
-      ctx.strokeStyle = 'rgba(127, 209, 232, 0.35)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(x, y, 68, 12, 3);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = current ? '#eaf4ff' : 'rgba(200, 225, 250, 0.55)';
-      ctx.font = 'bold 7px "Helvetica Neue", Arial, sans-serif';
-      ctx.fillText(names[i], x + 34, y + 6.5);
-      // Star lamp.
-      const on = done || (current && blink);
-      if (on) {
-        ctx.shadowColor = COLOR.FLAG_RED;
-        ctx.shadowBlur = 8;
-      }
-      decoStar(ctx, x - 9, y + 6, 5, on ? COLOR.FLAG_RED : 'rgba(230, 41, 62, 0.22)');
-      ctx.shadowBlur = 0;
     }
     ctx.restore();
   }
