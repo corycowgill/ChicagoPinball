@@ -78,18 +78,18 @@ export class Slingshot {
     const cy = (this.verts[0].y + this.verts[1].y + this.verts[2].y) / 3;
     softShadow(ctx, cx + 1, cy + 6, 38, 16, 0.6);
 
-    // Plastic decal — a translucent red triangle slightly inset.
+    // Plastic decal — WHITE flag-art plastic (reference style): white
+    // field, blue skyline silhouette along the bottom, red flag stars.
     ctx.save();
     const inset = 4;
     const verts = inflateTriangle(this.verts, -inset);
     const flashLift = 0.3 * this.flash;
 
     ctx.shadowColor = COLOR.INSERT_RED;
-    ctx.shadowBlur = 14 + 28 * this.flash;
+    ctx.shadowBlur = 6 + 30 * this.flash;
     const grad = ctx.createLinearGradient(verts[0].x, verts[0].y, verts[2].x, verts[2].y);
-    grad.addColorStop(0, `rgba(255, 65, 90, ${0.7 + flashLift})`);
-    grad.addColorStop(0.5, `rgba(255, 110, 130, ${0.85 + flashLift * 0.3})`);
-    grad.addColorStop(1, `rgba(180, 30, 50, ${0.75 + flashLift})`);
+    grad.addColorStop(0, `rgba(240, 246, 252, ${0.88 + flashLift * 0.1})`);
+    grad.addColorStop(1, `rgba(205, 220, 238, ${0.82 + flashLift * 0.1})`);
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.moveTo(verts[0].x, verts[0].y);
@@ -98,37 +98,40 @@ export class Slingshot {
     ctx.closePath();
     ctx.fill();
 
-    // Printed plastic art: deco fan rays from the apex toward the live
-    // edge, a Chicago star, and a brass trim line.
+    // Printed art, clipped to the decal: blue skyline along the bottom
+    // edge and two red flag stars above it.
     ctx.shadowBlur = 0;
     ctx.save();
-    ctx.clip(); // keep the print inside the decal triangle
-    ctx.strokeStyle = 'rgba(255, 235, 220, 0.28)';
-    ctx.lineWidth = 1.2;
-    for (let i = 1; i <= 3; i++) {
-      const t = i / 4;
-      const ex = this.bandA.x + (this.bandB.x - this.bandA.x) * t;
-      const ey = this.bandA.y + (this.bandB.y - this.bandA.y) * t;
-      ctx.beginPath();
-      ctx.moveTo(this.apex.x, this.apex.y);
-      ctx.lineTo(ex, ey);
-      ctx.stroke();
+    ctx.clip();
+    const minX = Math.min(verts[0].x, verts[1].x, verts[2].x);
+    const maxX = Math.max(verts[0].x, verts[1].x, verts[2].x);
+    const maxY = Math.max(verts[0].y, verts[1].y, verts[2].y);
+    ctx.fillStyle = 'rgba(20, 55, 110, 0.85)';
+    let bx = minX - 4;
+    let step = 0;
+    while (bx < maxX + 4) {
+      const w = 7 + ((step * 37) % 6);
+      const h = 8 + ((step * 53) % 12);
+      ctx.fillRect(bx, maxY - h, w, h);
+      bx += w + 2;
+      step++;
     }
+    decoStar(ctx, cx - 9, cy - 4, 5, 'rgba(230, 41, 62, 0.9)');
+    decoStar(ctx, cx + 9, cy - 4, 5, 'rgba(230, 41, 62, 0.9)');
     ctx.restore();
-    decoStar(ctx, cx, cy + 4, 8, 'rgba(255, 245, 235, 0.6)');
 
-    // Outer trim — brass over white (rebuild the decal path; the print
+    // Trim — blue over red edge (rebuild the decal path; the print
     // drawing above replaced the current path).
     ctx.beginPath();
     ctx.moveTo(verts[0].x, verts[0].y);
     ctx.lineTo(verts[1].x, verts[1].y);
     ctx.lineTo(verts[2].x, verts[2].y);
     ctx.closePath();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(230, 41, 62, 0.7)';
     ctx.stroke();
-    ctx.lineWidth = 0.8;
-    ctx.strokeStyle = 'rgba(217, 164, 65, 0.55)';
+    ctx.lineWidth = 0.9;
+    ctx.strokeStyle = 'rgba(127, 209, 232, 0.8)';
     ctx.stroke();
 
     // Glossy highlight along one edge (the apex-to-bandA edge)
