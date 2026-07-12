@@ -71,6 +71,7 @@ export class Renderer3D {
   private bumperCapMats: THREE.MeshStandardMaterial[] = [];
   private slingMats: THREE.MeshStandardMaterial[] = [];
   private beanMesh: THREE.Mesh | null = null;
+  private lockBallMeshes: THREE.Mesh[] = [];
   private lamps: {
     mesh: THREE.Mesh;
     mat: THREE.MeshStandardMaterial;
@@ -80,6 +81,7 @@ export class Renderer3D {
       | { t: 'sport'; i: number }
       | { t: 'kickback' }
       | { t: 'mystery' }
+      | { t: 'express' }
       | { t: 'loop'; i: number };
   }[] = [];
   private floodlights: THREE.SpotLight[] = [];
@@ -681,6 +683,19 @@ export class Renderer3D {
     bean.castShadow = true;
     this.beanMesh = bean;
     this.scene.add(bean);
+    // Locked multiball balls sit tucked behind the Bean, one per lock.
+    const lockSpots: Array<[number, number]> = [
+      [pf.bean.cx - 22, pf.bean.cy - 18],
+      [pf.bean.cx, pf.bean.cy - 27],
+      [pf.bean.cx + 22, pf.bean.cy - 18],
+    ];
+    for (const [lx, lz] of lockSpots) {
+      const lockBall = this.makeBallMesh(9);
+      lockBall.position.set(lx, 8, lz);
+      lockBall.visible = false;
+      this.lockBallMeshes.push(lockBall);
+      this.scene.add(lockBall);
+    }
 
     // Scoops: dark kickout hole + metal ring.
     for (const sc of [pf.lakeMichiganScoop, pf.cityTourScoop]) {
@@ -826,6 +841,17 @@ export class Renderer3D {
       .shooterPath(pf.rolloverXs[1])
       .map((p, i, arr) => toV3(p, 26 - 22 * (i / (arr.length - 1))));
     this.scene.add(this.wireform(shooterPts));
+
+    // EL EXPRESS wireform: right outlane up over the shooter-lane divider,
+    // down onto the plunger — the rescue ride the Express fare buys.
+    const exPts = pf
+      .expressPath()
+      .map((p, i, arr) => toV3(p, 4 + 24 * Math.sin((i / (arr.length - 1)) * Math.PI)));
+    this.scene.add(this.wireform(exPts));
+    // Station gate at the pickup — just above the apron line so it reads.
+    const gate = new THREE.Mesh(new THREE.BoxGeometry(24, 14, 2), this.railMat);
+    gate.position.set(pf.expressPos.x, 7, pf.expressPos.y - 14);
+    this.scene.add(gate);
   }
 
   /** Twin parallel chrome tubes with crossbar rings — a real habitrail. */
@@ -1270,6 +1296,7 @@ export class Renderer3D {
       lamp(x, z, 7, sportColor(s.id), { t: 'sport', i });
     });
     lamp(pf.kickbackPos.x, pf.kickbackPos.y - 8, 6, '#5cff9a', { t: 'kickback' });
+    lamp(pf.expressPos.x, pf.expressPos.y - 8, 6, '#3ff0ff', { t: 'express' });
     lamp(pf.lakeMichiganScoop.x, pf.lakeMichiganScoop.y - 34, 7, '#4ea0d8', { t: 'mystery' });
     pf.loopArrowXs.forEach((x, i) => lamp(x, 590, 8, '#7fd1e8', { t: 'loop', i }));
   }
@@ -1492,6 +1519,10 @@ export class Renderer3D {
       const s = 1 + pf.bean.flashLevel * 0.08;
       this.beanMesh.scale.set(1.25 * s, 0.8 * s, s);
     }
+    // Show one tucked ball per multiball lock.
+    this.lockBallMeshes.forEach((m, i) => {
+      m.visible = i < pf.bean.locked;
+    });
 
     this.animateTrain(hud);
     this.animateStadium(hud, now);
@@ -1603,6 +1634,7 @@ export class Renderer3D {
           hud.activeSport === k.i || (hud.crosstownActive && hud.crosstownLeft.includes(k.i));
         on = hud.sportsDone[k.i] || (active && blink);
       } else if (k.t === 'kickback') on = hud.kickbackLit && blink;
+      else if (k.t === 'express') on = hud.expressLit && blink;
       else if (k.t === 'mystery') on = hud.mysteryLit;
       else if (k.t === 'loop')
         on = (hud.multiball || hud.bossActive || hud.modeKind === 'loop') && blink;
@@ -1647,6 +1679,9 @@ export class Renderer3D {
       d.rightText(secs(hud.bossMsLeft), 10);
     } else if (hud.crosstownActive) {
       d.centerText(`CROSSTOWN ${hud.crosstownLeft.length} LEFT ${secs(hud.modeMsLeft)}`, 10);
+    } else if (hud.activeSport >= 0 && hud.hurryUpValue > 0) {
+      const s = SPORTS[hud.activeSport];
+      d.centerText(`${s.sport} HURRY ${Math.round(hud.hurryUpValue / 1000)}K`, 10);
     } else if (hud.activeSport >= 0) {
       const s = SPORTS[hud.activeSport];
       d.centerText(`${s.sport} ${hud.modeHits}/${hud.modeGoal} ${secs(hud.modeMsLeft)}`, 10);

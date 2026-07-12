@@ -20,6 +20,10 @@ import {
   CROSSTOWN_MS,
   TRAIN_PERIOD_MS,
   TRAIN_LAP_MS,
+  EXPRESS_FARE_HITS,
+  HURRYUP_START,
+  HURRYUP_FLOOR,
+  HURRYUP_DECAY_PER_S,
   TILT_LIMIT,
   TILT_DECAY_PER_S,
   REPLAY_SCORE,
@@ -166,6 +170,11 @@ export class Game {
   // Kickback (left outlane) + Mystery (LAKE scoop)
   private kickbackLit = false;
   private mysteryLit = true;
+  // EL EXPRESS (right outlane): pop bumpers pay the fare.
+  private expressLit = false;
+  private elFare = 0;
+  // Hurry-up finale: >0 while the last shot of a sport mode is pending.
+  private hurryUpValue = 0;
 
   // Per-ball progression
   private ballSaveMs = 0;
@@ -209,6 +218,7 @@ export class Game {
       onScoopMode: () => this.startMode(),
       onLanesComplete: () => this.advanceBonusX(),
       onLeftOutlane: (ball) => this.handleLeftOutlane(ball),
+      onRightOutlane: (ball) => this.handleRightOutlane(ball),
     });
   }
 
@@ -219,6 +229,16 @@ export class Game {
     this.renderer.pushToast('KICKBACK!', COLOR.NEON_GREEN, 1100);
     this.renderer.kick(3);
     this.sound.kickback();
+  }
+
+  private handleRightOutlane(ball: Matter.Body) {
+    if (this.state !== GameState.PLAYING || this.tilted || !this.expressLit) return;
+    this.expressLit = false; // one ride per fare
+    this.playfield.fireExpress(ball);
+    this.renderer.pushToast('EL EXPRESS — BACK TO THE LANE', COLOR.NEON_CYAN, 1500);
+    this.renderer.kick(2);
+    this.sound.trainPass();
+    this.sound.speak('All aboard!');
   }
 
   /** The Mystery wheel behind the LAKE scoop. */
@@ -241,6 +261,15 @@ export class Game {
         if (!this.kickbackLit) {
           this.kickbackLit = true;
           this.renderer.pushToast('MYSTERY: KICKBACK LIT', COLOR.NEON_GREEN, 1500);
+        } else {
+          this.score += 15000;
+          this.renderer.pushToast('MYSTERY: 15,000', COLOR.NEON_AMBER, 1500);
+        }
+      },
+      () => {
+        if (!this.expressLit) {
+          this.expressLit = true;
+          this.renderer.pushToast('MYSTERY: EL EXPRESS LIT', COLOR.NEON_CYAN, 1500);
         } else {
           this.score += 15000;
           this.renderer.pushToast('MYSTERY: 15,000', COLOR.NEON_AMBER, 1500);
@@ -376,6 +405,17 @@ export class Game {
       case 'pop-bumper':
         this.renderer.kick(2);
         this.sound.bumper();
+        // Pop bumpers pay the EL fare; a full fare lights the Express.
+        if (!this.expressLit) {
+          this.elFare++;
+          if (this.elFare >= EXPRESS_FARE_HITS) {
+            this.elFare = 0;
+            this.expressLit = true;
+            this.renderer.pushToast('EL EXPRESS LIT — RIGHT OUTLANE', COLOR.NEON_CYAN, 1600);
+            this.sound.rollover();
+            this.sound.speak('Express is lit!');
+          }
+        }
         break;
       case 'slingshot':
         this.renderer.kick(2.5);
@@ -473,15 +513,24 @@ export class Game {
       this.renderer.sportEvent(sportIdx, 'hit');
       const pts = POINTS.SPORT_SHOT * this.sportHits;
       if (this.sportHits >= sport.goal) {
+        // Bank the hurry-up on the finishing shot.
+        const hurry = Math.round(this.hurryUpValue);
+        this.hurryUpValue = 0;
+        if (hurry > 0) {
+          this.renderer.pushToast(`HURRY-UP +${hurry.toLocaleString()}`, COLOR.NEON_AMBER, 1500);
+        }
         this.completeSport(sportIdx);
-        return pts + POINTS.SPORT_COMPLETE;
+        return pts + hurry + POINTS.SPORT_COMPLETE;
       }
       this.sportStinger(sport.id);
-      this.renderer.pushToast(
-        `${sport.mode} ${this.sportHits}/${sport.goal} +${pts.toLocaleString()}`,
-        COLOR.NEON_AMBER,
-        1200,
-      );
+      if (this.sportHits === sport.goal - 1) this.startHurryUp(sportIdx);
+      else {
+        this.renderer.pushToast(
+          `${sport.mode} ${this.sportHits}/${sport.goal} +${pts.toLocaleString()}`,
+          COLOR.NEON_AMBER,
+          1200,
+        );
+      }
       return pts;
     }
 
@@ -500,14 +549,32 @@ export class Game {
       this.sound.crowd(1000, 0.16);
       this.sound.speak(`${sport.mode.toLowerCase()}!`, true);
       this.renderer.pushToast(`${sport.mode}!`, COLOR.NEON_AMBER, 1600);
-      this.renderer.pushToast(
-        `${sport.goal - 1} MORE: ${sport.shotName}`,
-        COLOR.TEXT_DIM,
-        1600,
-      );
+      if (this.sportHits === sport.goal - 1) {
+        // Two-shot modes go straight to the finale.
+        this.startHurryUp(sportIdx);
+      } else {
+        this.renderer.pushToast(
+          `${sport.goal - 1} MORE: ${sport.shotName}`,
+          COLOR.TEXT_DIM,
+          1600,
+        );
+      }
       return POINTS.SPORT_SHOT;
     }
     return 0;
+  }
+
+  /** The last required shot becomes a countdown value — shoot it fast. */
+  private startHurryUp(sportIdx: number) {
+    const sport = SPORTS[sportIdx];
+    this.hurryUpValue = HURRYUP_START;
+    this.renderer.pushToast(
+      `HURRY-UP ${HURRYUP_START.toLocaleString()} — ${sport.shotName}`,
+      COLOR.NEON_AMBER,
+      1600,
+    );
+    this.sound.combo(4);
+    this.sound.speak('Hurry up!', true);
   }
 
   private completeSport(sportIdx: number) {
@@ -838,7 +905,15 @@ export class Game {
         this.renderer.pushToast(`${SPORTS[this.activeSport].mode} OVER`, COLOR.TEXT_DIM, 1200);
         this.activeSport = -1;
       }
+      // Hurry-up finale counts down to its floor.
+      if (this.hurryUpValue > HURRYUP_FLOOR) {
+        this.hurryUpValue = Math.max(
+          HURRYUP_FLOOR,
+          this.hurryUpValue - (HURRYUP_DECAY_PER_S * dtMs) / 1000,
+        );
+      }
     }
+    if (this.activeSport < 0) this.hurryUpValue = 0;
     if (this.crosstownActive && this.state === GameState.PLAYING) {
       this.crosstownMsLeft -= dtMs;
       if (this.crosstownMsLeft <= 0) this.crosstownFail();
@@ -901,6 +976,9 @@ export class Game {
     this.pairCubsBears = false;
     this.pairBullsSox = false;
     this.cityLightsAwarded = false;
+    this.hurryUpValue = 0;
+    this.expressLit = false;
+    this.elFare = 0;
     this.tiltHeat = 0;
     this.tilted = false;
     this.kickbackLit = false;
@@ -965,6 +1043,8 @@ export class Game {
       tilted: this.tilted,
       kickbackLit: this.kickbackLit,
       mysteryLit: this.mysteryLit,
+      expressLit: this.expressLit,
+      hurryUpValue: Math.round(this.hurryUpValue),
       bonusX: this.bonusX,
       ballSaveMs: this.ballSaveMs,
       highScore: this.highScore,
@@ -989,6 +1069,9 @@ export class Game {
     this.pairCubsBears = false;
     this.pairBullsSox = false;
     this.cityLightsAwarded = false;
+    this.hurryUpValue = 0;
+    this.expressLit = false;
+    this.elFare = 0;
     this.lastTrainCycle = -1;
     this.tiltHeat = 0;
     this.tilted = false;

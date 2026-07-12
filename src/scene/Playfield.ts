@@ -36,6 +36,9 @@ export interface PlayfieldEvents {
   /** Ball entered the LEFT outlane just above the drain — the Game decides
    *  whether the kickback is lit and fires it via fireKickback(). */
   onLeftOutlane: (ball: Matter.Body) => void;
+  /** Ball entered the RIGHT outlane — the Game decides whether the EL
+   *  EXPRESS is lit and fires it via fireExpress(). */
+  onRightOutlane: (ball: Matter.Body) => void;
 }
 
 interface Pt {
@@ -120,6 +123,10 @@ export class Playfield {
 
   /** Kickback kicker position (left outlane, drawn by the Renderer). */
   readonly kickbackPos = { x: 21, y: 884 };
+  /** EL EXPRESS pickup (right outlane) and its wireform over the shooter
+   *  lane divider — shared by fireExpress() and the renderer. */
+  readonly expressPos = { x: 459, y: 884 };
+  private lastExpressAt = -1000;
   /** True from launch until the first top-lane pass — that pass is the
    *  skill shot; later passes just score/light the lane. */
   private skillShotArmed = false;
@@ -312,6 +319,14 @@ export class Playfield {
       label: 'left-outlane',
     });
     physics.add(kickbackSensor);
+
+    // ── EL EXPRESS sensor — right outlane, mirror of the kickback. ──
+    const expressSensor = Matter.Bodies.rectangle(this.expressPos.x, this.expressPos.y, 38, 10, {
+      isStatic: true,
+      isSensor: true,
+      label: 'right-outlane',
+    });
+    physics.add(expressSensor);
 
     // ── LOOP SENSORS — the edge channels are shootable lanes: a ball sent
     //    up along either wall slides the channel, crosses behind the top
@@ -520,6 +535,14 @@ export class Playfield {
       if (Matter.Body.getVelocity(o).y <= 0) return; // falling balls only
       if (this.clockMs - this.lastKickbackAt < 800) return;
       this.events.onLeftOutlane(o);
+    });
+
+    // Right outlane — EL EXPRESS territory.
+    physics.on('right-outlane', (_s, o) => {
+      if (o.label !== 'ball') return;
+      if (Matter.Body.getVelocity(o).y <= 0) return; // falling balls only
+      if (this.clockMs - this.lastExpressAt < 1000) return;
+      this.events.onRightOutlane(o);
     });
 
     // Shooter-lane exit: the launched ball rides the visible wireform over
@@ -780,6 +803,24 @@ export class Playfield {
       Matter.Body.setVelocity(ball, { x: 0.6, y: -21 });
       Matter.Body.setAngularVelocity(ball, 0);
     });
+  }
+
+  /** The EL EXPRESS wireform: right outlane, over the shooter-lane divider,
+   *  down onto the plunger. Also drawn by the renderer. */
+  expressPath(): Pt[] {
+    return [
+      { x: this.expressPos.x, y: this.expressPos.y },
+      { x: 468, y: 848 },
+      { x: 488, y: 826 },
+      { x: this.launchX, y: 844 },
+      { x: this.launchX, y: this.launchRestY - 26 },
+    ];
+  }
+
+  /** Ride the Express: carry the outlane ball back to the shooter lane. */
+  fireExpress(ball: Matter.Body) {
+    this.lastExpressAt = this.clockMs;
+    this.physics.defer(() => this.startTransit(ball, this.expressPath(), 8, { x: 0, y: 2 }));
   }
 
   /** Nudge: shove every live ball. `dir` −1 = from the left (push right),

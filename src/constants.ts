@@ -56,6 +56,17 @@ export const CROSSTOWN_MS = 60000;
 export const TRAIN_PERIOD_MS = 26000;
 export const TRAIN_LAP_MS = 9000;
 
+// EL EXPRESS — the right-outlane rescue. Pop bumper hits pay the fare;
+// once lit, a ball dropping into the right outlane rides the Express
+// wireform back to the shooter lane instead of draining.
+export const EXPRESS_FARE_HITS = 12;
+
+// Hurry-up finale: the LAST required shot of every sport mode is worth a
+// countdown value — banked the moment the shot is made.
+export const HURRYUP_START = 60000;
+export const HURRYUP_FLOOR = 12000;
+export const HURRYUP_DECAY_PER_S = 1600;
+
 // Nudge / tilt: each nudge adds 1 heat; heat decays per second; exceeding
 // the limit tilts — flippers dead and bonus forfeited for the ball.
 export const TILT_LIMIT = 3;
