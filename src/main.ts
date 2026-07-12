@@ -1,20 +1,14 @@
 import { Game } from './Game';
-import { PLAYFIELD_W, PLAYFIELD_H } from './constants';
+import { Renderer3D } from './Renderer3D';
 
-const canvas = document.getElementById('stage') as HTMLCanvasElement;
-if (!canvas) throw new Error('canvas #stage not found');
+const glCanvas = document.getElementById('gl') as HTMLCanvasElement;
+const uiCanvas = document.getElementById('ui') as HTMLCanvasElement;
+if (!glCanvas || !uiCanvas) throw new Error('stage canvases not found');
 
-// Hi-DPI scaling for crisp rendering on retina displays.
-const ctx = canvas.getContext('2d', { alpha: false })!;
-const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-canvas.width = PLAYFIELD_W * dpr;
-canvas.height = PLAYFIELD_H * dpr;
-ctx.scale(dpr, dpr);
-
-const game = new Game(ctx, canvas);
-// Test hook: expose flipper bodies for headless angle sampling. No-op in
-// production beyond a small property write — the bodies aren't enumerable in
-// the UI.
+const renderer = new Renderer3D(glCanvas, uiCanvas);
+// Input lands on the top (overlay) canvas.
+const game = new Game(renderer, uiCanvas);
+// Test hook: expose the game for headless probes.
 (window as unknown as { __pinball?: unknown }).__pinball = game;
 
 // Fixed-timestep loop with accumulator.

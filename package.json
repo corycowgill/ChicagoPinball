@@ -9,10 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "matter-js": "^0.20.0"
+    "matter-js": "^0.20.0",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@types/matter-js": "^0.19.7",
+    "@types/three": "^0.185.1",
     "typescript": "^5.5.4",
     "vite": "^5.4.8"
   }

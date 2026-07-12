@@ -15,6 +15,7 @@ export class Slingshot {
   /** Apex post (the third vertex). */
   readonly apex: { x: number; y: number };
   private flash = 0;
+  get flashLevel(): number { return this.flash; }
 
   constructor(verts: [Matter.Vector, Matter.Vector, Matter.Vector], normal: Matter.Vector) {
     this.verts = verts.map((v) => ({ x: v.x, y: v.y }));

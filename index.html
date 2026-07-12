@@ -51,24 +51,33 @@
         box-sizing: border-box;
       }
       #stage {
+        position: relative;
         display: block;
         /* Fit within both viewport dimensions while preserving 540:960 aspect. */
         width: min(100vw, calc(var(--vh) * 540 / 960));
-        height: auto;
+        aspect-ratio: 540 / 960;
         max-width: 100%;
         max-height: 100%;
-        aspect-ratio: 540 / 960;
         background: #05060a;
         box-shadow:
           0 0 60px rgba(0, 240, 255, 0.18),
           0 0 120px rgba(255, 60, 100, 0.12);
-        image-rendering: -webkit-optimize-contrast;
+        touch-action: none;
+      }
+      #stage canvas {
+        position: absolute;
+        inset: 0;
+        width: 100% !important;
+        height: 100% !important;
         touch-action: none;
       }
     </style>
   </head>
   <body>
-    <canvas id="stage" width="540" height="960"></canvas>
+    <div id="stage">
+      <canvas id="gl"></canvas>
+      <canvas id="ui" width="1080" height="1920"></canvas>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

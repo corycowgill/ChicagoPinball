@@ -19,6 +19,7 @@ export class Bean {
   // multiball a 12-hit grind nobody reached.)
   static readonly HITS_PER_LOCK = 2;
   private flash = 0;
+  get flashLevel(): number { return this.flash; }
 
   constructor(public readonly cx: number, public readonly cy: number, radius = 38) {
     this.radius = radius;
