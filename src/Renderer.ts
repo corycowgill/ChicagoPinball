@@ -61,6 +61,8 @@ export interface HudInfo {
   expressLit: boolean;
   /** Countdown value of the pending sport-mode finale shot (0 = none). */
   hurryUpValue: number;
+  /** Inside the combo window — the eligible shot arrows strobe. */
+  comboActive: boolean;
   bonusX: number;
   ballSaveMs: number;
   highScore: number;
