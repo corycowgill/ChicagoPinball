@@ -71,7 +71,6 @@ export class Renderer3D {
   private bumperCapMats: THREE.MeshStandardMaterial[] = [];
   private slingMats: THREE.MeshStandardMaterial[] = [];
   private beanMesh: THREE.Mesh | null = null;
-  private lockBallMeshes: THREE.Mesh[] = [];
   private lamps: {
     mesh: THREE.Mesh;
     mat: THREE.MeshStandardMaterial;
@@ -82,6 +81,7 @@ export class Renderer3D {
       | { t: 'kickback' }
       | { t: 'mystery' }
       | { t: 'express' }
+      | { t: 'lock'; i: number }
       | { t: 'loop'; i: number };
   }[] = [];
   private floodlights: THREE.SpotLight[] = [];
@@ -143,7 +143,7 @@ export class Renderer3D {
     this.scene.add(key, key.target);
     for (const fx of [40, PLAYFIELD_W - 40]) {
       const spot = new THREE.SpotLight(0xffe7c0, 230000, 0, 0.55, 0.55, 1.8);
-      spot.position.set(fx, 330, 16);
+      spot.position.set(fx, 330, 50); // just in front of the backbox face
       spot.target.position.set(PLAYFIELD_W / 2, 0, 560);
       spot.castShadow = this.quality === 'high';
       spot.shadow.mapSize.set(1024, 1024);
@@ -683,19 +683,6 @@ export class Renderer3D {
     bean.castShadow = true;
     this.beanMesh = bean;
     this.scene.add(bean);
-    // Locked multiball balls sit tucked behind the Bean, one per lock.
-    const lockSpots: Array<[number, number]> = [
-      [pf.bean.cx - 22, pf.bean.cy - 18],
-      [pf.bean.cx, pf.bean.cy - 27],
-      [pf.bean.cx + 22, pf.bean.cy - 18],
-    ];
-    for (const [lx, lz] of lockSpots) {
-      const lockBall = this.makeBallMesh(9);
-      lockBall.position.set(lx, 8, lz);
-      lockBall.visible = false;
-      this.lockBallMeshes.push(lockBall);
-      this.scene.add(lockBall);
-    }
 
     // Scoops: dark kickout hole + metal ring.
     for (const sc of [pf.lakeMichiganScoop, pf.cityTourScoop]) {
@@ -741,6 +728,35 @@ export class Renderer3D {
       this.scene.add(mesh);
     }
 
+    // Captive lane: rails, cap and stop posts were physics-only before —
+    // invisible walls the ball visibly bounced off. Build them from the
+    // same numbers the entity uses.
+    {
+      const cx = pf.captive.x;
+      const cy = pf.captive.y;
+      const laneTop = cy - 74;
+      const wallLen = 70;
+      for (const sx of [cx - 23, cx + 23]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(6, 22, wallLen), this.railMat);
+        rail.position.set(sx, 11, laneTop + wallLen / 2);
+        rail.castShadow = true;
+        this.scene.add(rail);
+      }
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(52, 22, 6), this.railMat);
+      cap.position.set(cx, 11, laneTop - 3);
+      this.scene.add(cap);
+      for (const p of pf.captive.posts) {
+        const post = new THREE.Mesh(
+          new THREE.CylinderGeometry(p.r, p.r + 1, 20, 12),
+          this.railMat,
+        );
+        post.position.set(p.x, 10, p.y);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(p.r + 0.6, 1.6, 8, 14), this.rubberMat);
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(p.x, 10, p.y);
+        this.scene.add(post, ring);
+      }
+    }
     // Captive lane ball + spinner blade.
     this.captiveMesh = this.makeBallMesh(10);
     this.scene.add(this.captiveMesh);
@@ -848,9 +864,10 @@ export class Renderer3D {
       .expressPath()
       .map((p, i, arr) => toV3(p, 4 + 24 * Math.sin((i / (arr.length - 1)) * Math.PI)));
     this.scene.add(this.wireform(exPts));
-    // Station gate at the pickup — just above the apron line so it reads.
-    const gate = new THREE.Mesh(new THREE.BoxGeometry(24, 14, 2), this.railMat);
-    gate.position.set(pf.expressPos.x, 7, pf.expressPos.y - 14);
+    // Station sign bridges the outlane from the divider rail to the wall,
+    // clear above ball height (tops at y 22) so drains pass beneath it.
+    const gate = new THREE.Mesh(new THREE.BoxGeometry(44, 14, 4), this.railMat);
+    gate.position.set(460, 31, pf.expressPos.y - 14);
     this.scene.add(gate);
   }
 
@@ -962,13 +979,16 @@ export class Renderer3D {
     this.buildSoccer(pf);
   }
 
-  /** Raised plastic panel on thin chrome legs. */
+  /** Raised plastic panel on chrome legs. Leg positions are explicit —
+   *  they carry matching physics posts in the Playfield, and must stay
+   *  clear of the ramp runs beneath the panels. */
   private raisedPanel(
     x: number,
     z: number,
     w: number,
     d: number,
     y: number,
+    legs: Array<[number, number]>,
     paint: (ctx: CanvasRenderingContext2D, w: number, h: number) => void,
   ): THREE.Group {
     const group = new THREE.Group();
@@ -987,10 +1007,7 @@ export class Renderer3D {
     plate.position.set(x, y, z);
     plate.castShadow = true;
     group.add(plate);
-    for (const [lx, lz] of [
-      [x - w / 2 + 4, z - d / 2 + 4],
-      [x + w / 2 - 4, z + d / 2 - 4],
-    ]) {
+    for (const [lx, lz] of legs) {
       const leg = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.8, y, 8), this.chromeMat);
       leg.position.set(lx, y / 2, lz);
       group.add(leg);
@@ -998,9 +1015,11 @@ export class Renderer3D {
     return group;
   }
 
-  /** BASEBALL — miniature diamond panel + swinging bat over the left ramp. */
+  /** BASEBALL — miniature diamond panel + swinging bat over the left ramp.
+   *  Panel rides at y44 so ramp-transit balls (drawn at y30, r11) clear its
+   *  underside; legs avoid the acrylic channel crossing the SW corner. */
   private buildBaseball() {
-    const group = this.raisedPanel(136, 264, 62, 52, 40, (ctx, w, h) => {
+    const group = this.raisedPanel(136, 264, 62, 52, 44, [[162, 244], [110, 288]], (ctx, w, h) => {
       ctx.fillStyle = '#2e7d3a'; // outfield grass
       ctx.fillRect(0, 0, w, h);
       ctx.fillStyle = '#c9925a'; // infield dirt
@@ -1038,14 +1057,14 @@ export class Renderer3D {
     stick.rotation.z = Math.PI / 2;
     stick.position.x = 9;
     bat.add(stick);
-    bat.position.set(136, 43.5, 284);
+    bat.position.set(136, 47.5, 284);
     this.batGroup = bat;
     group.add(bat);
     const ball = new THREE.Mesh(
       new THREE.SphereGeometry(2.2, 10, 8),
       new THREE.MeshStandardMaterial({ color: 0xf5fbff, roughness: 0.4 }),
     );
-    ball.position.set(136, 43.5, 254);
+    ball.position.set(136, 47.5, 254);
     group.add(ball);
     // Diamond flash lamp under the panel.
     const flashMat = new THREE.MeshStandardMaterial({
@@ -1062,7 +1081,7 @@ export class Renderer3D {
 
   /** HOCKEY — ice panel, goal cage, puck and a real goal light. */
   private buildHockey() {
-    const group = this.raisedPanel(404, 260, 62, 50, 40, (ctx, w, h) => {
+    const group = this.raisedPanel(404, 260, 62, 50, 44, [[380, 236], [431, 281]], (ctx, w, h) => {
       ctx.fillStyle = '#dcecf8'; // ice
       ctx.fillRect(0, 0, w, h);
       ctx.strokeStyle = '#d33'; // center line + circles
@@ -1105,19 +1124,19 @@ export class Renderer3D {
     net.rotation.x = 0.5;
     net.position.set(0, 5.4, -3.4);
     goal.add(net);
-    goal.position.set(404, 41.2, 246);
+    goal.position.set(404, 45.2, 246);
     group.add(goal);
     // Puck.
     const puck = new THREE.Mesh(
       new THREE.CylinderGeometry(3, 3, 1.6, 14),
       new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.6 }),
     );
-    puck.position.set(404, 42.4, 268);
+    puck.position.set(404, 46.4, 268);
     this.puckMesh = puck;
     group.add(puck);
     // Rotating goal light on a pole behind the cage.
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 14, 8), this.chromeMat);
-    pole.position.set(422, 47, 242);
+    pole.position.set(422, 51, 242);
     group.add(pole);
     const lampMat = new THREE.MeshStandardMaterial({
       color: 0x300a10,
@@ -1125,7 +1144,7 @@ export class Renderer3D {
       emissiveIntensity: 0.15,
     });
     const dome = new THREE.Mesh(new THREE.SphereGeometry(3.4, 12, 8), lampMat);
-    dome.position.set(422, 55, 242);
+    dome.position.set(422, 59, 242);
     this.hockeyLampMat = lampMat;
     group.add(dome);
     this.scene.add(group);
@@ -1167,9 +1186,16 @@ export class Renderer3D {
   private buildBasketball(pf: Playfield) {
     void pf;
     const group = new THREE.Group();
+    // Pole sits inside the shooter-lane divider wall (x 477–483) so lane
+    // balls (surfaces reach x 483) never clip it.
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.8, 54, 10), this.chromeMat);
-    pole.position.set(486, 27, 396);
+    pole.position.set(480, 27, 396);
     group.add(pole);
+    // Short arm from the pole to the backboard.
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 8, 8), this.chromeMat);
+    arm.rotation.z = Math.PI / 2;
+    arm.position.set(483, 52, 392);
+    group.add(arm);
     // Backboard with painted square.
     const c = document.createElement('canvas');
     c.width = 96;
@@ -1214,24 +1240,26 @@ export class Renderer3D {
     this.scene.add(group);
   }
 
-  /** SOCCER — goal frame + net wrapped around the MODE scoop, so shots
-   *  into the scoop bury themselves in the back of the net. */
+  /** SOCCER — goal frame + net on the WEST side of the MODE scoop, mouth
+   *  facing the hole. The east side stays open: it's the captive-lane
+   *  approach corridor (posts there deflected the captive shot). */
   private buildSoccer(pf: Playfield) {
     const sx = pf.cityTourScoop.x;
     const sz = pf.cityTourScoop.y;
+    const gx = sx - 17; // goal line
     const group = new THREE.Group();
     const frameMat = new THREE.MeshStandardMaterial({ color: 0xf5fbff, roughness: 0.35 });
-    for (const gx of [sx - 21, sx + 21]) {
+    for (const gz of [sz - 12, sz + 12]) {
       const post = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 18, 8), frameMat);
-      post.position.set(gx, 9, sz + 10);
+      post.position.set(gx, 9, gz);
       group.add(post);
     }
-    const crossbar = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 43, 8), frameMat);
-    crossbar.rotation.z = Math.PI / 2;
-    crossbar.position.set(sx, 18, sz + 10);
+    const crossbar = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 25, 8), frameMat);
+    crossbar.rotation.x = Math.PI / 2;
+    crossbar.position.set(gx, 18, sz);
     group.add(crossbar);
     const net = new THREE.Mesh(
-      new THREE.PlaneGeometry(42, 22),
+      new THREE.PlaneGeometry(24, 22),
       new THREE.MeshStandardMaterial({
         color: 0xf5fbff,
         transparent: true,
@@ -1240,8 +1268,9 @@ export class Renderer3D {
         wireframe: true,
       }),
     );
+    net.rotation.y = Math.PI / 2;
     net.rotation.x = -0.9;
-    net.position.set(sx, 10, sz + 19);
+    net.position.set(gx - 8, 10, sz);
     group.add(net);
     // Green goal lamp.
     const lampMat = new THREE.MeshStandardMaterial({
@@ -1250,7 +1279,7 @@ export class Renderer3D {
       emissiveIntensity: 0.15,
     });
     const lamp = new THREE.Mesh(new THREE.SphereGeometry(2.8, 10, 8), lampMat);
-    lamp.position.set(sx + 26, 20, sz + 12);
+    lamp.position.set(gx, 22, sz - 18);
     this.soccerLampMat = lampMat;
     group.add(lamp);
     this.scene.add(group);
@@ -1276,9 +1305,10 @@ export class Renderer3D {
       this.lamps.push({ mesh, mat, kind });
     };
     pf.rollovers.forEach((r, i) => lamp(r.x, r.y, 8, '#5cff9a', { t: 'rollover', i }));
-    // CHICAGO letter inserts above the stadium.
+    // CHICAGO letter inserts above the stadium — 22 px spacing keeps the
+    // end lamps clear of both ramp-mouth funnel rails.
     for (let i = 0; i < CHICAGO.length; i++) {
-      lamp(PLAYFIELD_W / 2 - ((CHICAGO.length - 1) * 26) / 2 + i * 26, 528, 8, '#e6293e', {
+      lamp(PLAYFIELD_W / 2 - ((CHICAGO.length - 1) * 22) / 2 + i * 22, 528, 8, '#e6293e', {
         t: 'chicago',
         i,
       });
@@ -1289,7 +1319,7 @@ export class Renderer3D {
       [pf.loopArrowXs[0], 622], // football — left orbit
       [325, 598], // basketball — right ramp mouth
       [pf.loopArrowXs[1], 622], // hockey — right orbit
-      [pf.cityTourScoop.x, pf.cityTourScoop.y + 44], // soccer — the scoop
+      [pf.cityTourScoop.x, pf.cityTourScoop.y - 45], // soccer — the scoop approach
     ];
     SPORTS.forEach((s, i) => {
       const [x, z] = sportInsertPos[i];
@@ -1297,6 +1327,14 @@ export class Renderer3D {
     });
     lamp(pf.kickbackPos.x, pf.kickbackPos.y - 8, 6, '#5cff9a', { t: 'kickback' });
     lamp(pf.expressPos.x, pf.expressPos.y - 8, 6, '#3ff0ff', { t: 'express' });
+    // Lock inserts in a small arc below the Bean — flat, so live balls can
+    // roll over them (the old tucked-ball toys sat in a live ball path).
+    const lockSpots: Array<[number, number]> = [
+      [pf.bean.cx - 18, pf.bean.cy + 34],
+      [pf.bean.cx, pf.bean.cy + 40],
+      [pf.bean.cx + 18, pf.bean.cy + 34],
+    ];
+    lockSpots.forEach(([x, z], i) => lamp(x, z, 5, '#ff3a4f', { t: 'lock', i }));
     lamp(pf.lakeMichiganScoop.x, pf.lakeMichiganScoop.y - 34, 7, '#4ea0d8', { t: 'mystery' });
     pf.loopArrowXs.forEach((x, i) => lamp(x, 590, 8, '#7fd1e8', { t: 'loop', i }));
   }
@@ -1519,10 +1557,6 @@ export class Renderer3D {
       const s = 1 + pf.bean.flashLevel * 0.08;
       this.beanMesh.scale.set(1.25 * s, 0.8 * s, s);
     }
-    // Show one tucked ball per multiball lock.
-    this.lockBallMeshes.forEach((m, i) => {
-      m.visible = i < pf.bean.locked;
-    });
 
     this.animateTrain(hud);
     this.animateStadium(hud, now);
@@ -1635,6 +1669,7 @@ export class Renderer3D {
         on = hud.sportsDone[k.i] || (active && blink);
       } else if (k.t === 'kickback') on = hud.kickbackLit && blink;
       else if (k.t === 'express') on = hud.expressLit && blink;
+      else if (k.t === 'lock') on = k.i < pf.bean.locked;
       else if (k.t === 'mystery') on = hud.mysteryLit;
       else if (k.t === 'loop')
         on = (hud.multiball || hud.bossActive || hud.modeKind === 'loop') && blink;

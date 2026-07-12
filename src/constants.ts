@@ -21,13 +21,17 @@ export const GRAVITY_Y = 0.95;
 // Matter.Body.getVelocity (normalized to px per 16.6 ms) instead.
 export const PHYSICS_SUBSTEPS = 3;
 
-export const FLIPPER_LEN = 108;
+// Bat length + rest angle set the drain gap: tips sit at
+// playCenter ± (118 − LEN·cos(REST)) → a 32 px surface gap between resting
+// bats, ~1.5 ball widths, so a dead-centre ball drains like it should
+// (108 / 0.42 sealed the middle — the gap was 10.8 px, under one ball).
+export const FLIPPER_LEN = 98;
 // Bat thickness must always exceed BALL_MAX_SPEED — see above.
 export const FLIPPER_HEIGHT = 28;
-export const FLIPPER_REST_ANGLE = 0.42;
+export const FLIPPER_REST_ANGLE = 0.46;
 export const FLIPPER_ACTIVE_ANGLE = -0.42;
 // Per-frame radian increments — see Flipper.ts. Tuned so the tip sweeps at
-// 0.20 × 108 = 21.6 px/frame, fast enough to send a ball near the speed cap
+// 0.20 × 98 = 19.6 px/frame, fast enough to send a ball near the speed cap
 // while staying under the bat thickness (no tunnelling).
 export const FLIPPER_KICK_VEL = 0.2;
 export const FLIPPER_RETURN_VEL = 0.11;
