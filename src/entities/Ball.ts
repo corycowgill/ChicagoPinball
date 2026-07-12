@@ -27,6 +27,13 @@ export class Ball {
     });
   }
 
+  /** Test/probe helper: set the ball's velocity through Matter properly
+   *  (direct writes to body.velocity are ignored by the integrator). */
+  setVelocity(vx: number, vy: number) {
+    Matter.Body.setVelocity(this.body, { x: vx, y: vy });
+    Matter.Body.setAngularVelocity(this.body, 0);
+  }
+
   capVelocity() {
     const v = Matter.Body.getVelocity(this.body);
     const mag = Math.hypot(v.x, v.y);

@@ -499,6 +499,12 @@ export class Playfield {
 
     physics.on('scoop', (_s, o) => {
       if (o.label !== 'ball') return;
+      // Fast balls skip over the hole (like a real scoop) — this is what
+      // keeps the captive shot makeable: the MODE scoop's capture circle
+      // shadows the left-flipper→captive corridor, so a ripped shot passes
+      // over it while a controlled shot sinks and starts a mode.
+      const speed = Matter.Body.getVelocity(o);
+      if (Math.hypot(speed.x, speed.y) > 16) return;
       if (this.cityTourScoop.capture(o)) {
         this.events.onScore({ kind: 'scoop', points: POINTS.SCOOP });
         this.events.onScoopMode();
@@ -745,6 +751,28 @@ export class Playfield {
         restitution: 0.5,
       });
       this.addWall(post, 'rail');
+    }
+
+    // ── ATTRACTION SUPPORTS — the raised sports panels and the soccer goal
+    //    frame stand on real posts, so live balls can't roll through what
+    //    they see. Rendered by the attraction builders (kind 'wood' hides
+    //    them from the generic chrome-post pass). ──
+    for (const [px, py, r] of [
+      [162, 244, 3], // baseball panel, NE leg
+      [110, 288, 3], // baseball panel, SW leg (clear of the left ramp run)
+      [380, 236, 3], // hockey panel, NW leg
+      [431, 281, 3], // hockey panel, SE leg
+      // Soccer goal posts stand WEST of the scoop — the captive-lane
+      // approach corridor (x ≥ ~389) must stay clear.
+      [383, 533, 2.5],
+      [383, 557, 2.5],
+    ]) {
+      const post = Matter.Bodies.circle(px, py, r, {
+        isStatic: true,
+        label: 'wall',
+        restitution: 0.4,
+      });
+      this.addWall(post, 'wood');
     }
   }
 

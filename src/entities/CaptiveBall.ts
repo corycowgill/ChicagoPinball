@@ -57,13 +57,15 @@ export class CaptiveBall {
         label: 'wall',
       }),
     );
-    // Stop posts at the mouth. Gap between their surfaces ≈ ball diameter,
-    // so the captive rests wedged on them and the striking ball can touch
-    // it but can't squeeze into the lane.
-    const postR = 6;
+    // Stop posts at the mouth. The pinch must leave real clearance for the
+    // striking ball (r 11): at ±17/r6 the clearance was exactly 0 px and
+    // the solver absorbed every shot at the pinch — the captive was
+    // physically unhittable. ±20/r5 leaves 4 px a side; the tether (not
+    // the posts) is what keeps the captive in its lane.
+    const postR = 5;
     this.posts = [
-      { x: x - 17, y, r: postR },
-      { x: x + 17, y, r: postR },
+      { x: x - 20, y, r: postR },
+      { x: x + 20, y, r: postR },
     ];
     for (const p of this.posts) {
       this.walls.push(

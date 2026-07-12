@@ -24,7 +24,7 @@ export class Scoop {
   ) {
     this.kickAngle = kickAngle;
     this.kickSpeed = kickSpeed;
-    this.sensor = Matter.Bodies.circle(x, y, 16, {
+    this.sensor = Matter.Bodies.circle(x, y, 14, {
       isStatic: true,
       isSensor: true,
       label: 'scoop',
