@@ -1,6 +1,6 @@
 import Matter from 'matter-js';
 import { COLOR } from '../constants';
-import { metalPost, softShadow } from '../Graphics';
+import { metalPost, softShadow, decoStar } from '../Graphics';
 
 /** Slingshot — triangular rubber kicker above the inlane that pops a ball
  *  inward when struck. Drawn as black rubber stretched between two metal
@@ -98,10 +98,37 @@ export class Slingshot {
     ctx.closePath();
     ctx.fill();
 
-    // Outer trim
+    // Printed plastic art: deco fan rays from the apex toward the live
+    // edge, a Chicago star, and a brass trim line.
     ctx.shadowBlur = 0;
+    ctx.save();
+    ctx.clip(); // keep the print inside the decal triangle
+    ctx.strokeStyle = 'rgba(255, 235, 220, 0.28)';
+    ctx.lineWidth = 1.2;
+    for (let i = 1; i <= 3; i++) {
+      const t = i / 4;
+      const ex = this.bandA.x + (this.bandB.x - this.bandA.x) * t;
+      const ey = this.bandA.y + (this.bandB.y - this.bandA.y) * t;
+      ctx.beginPath();
+      ctx.moveTo(this.apex.x, this.apex.y);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+    }
+    ctx.restore();
+    decoStar(ctx, cx, cy + 4, 8, 'rgba(255, 245, 235, 0.6)');
+
+    // Outer trim — brass over white (rebuild the decal path; the print
+    // drawing above replaced the current path).
+    ctx.beginPath();
+    ctx.moveTo(verts[0].x, verts[0].y);
+    ctx.lineTo(verts[1].x, verts[1].y);
+    ctx.lineTo(verts[2].x, verts[2].y);
+    ctx.closePath();
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.stroke();
+    ctx.lineWidth = 0.8;
+    ctx.strokeStyle = 'rgba(217, 164, 65, 0.55)';
     ctx.stroke();
 
     // Glossy highlight along one edge (the apex-to-bandA edge)

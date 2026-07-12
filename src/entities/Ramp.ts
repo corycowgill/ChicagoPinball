@@ -75,6 +75,33 @@ export class Ramp {
     // Glow when freshly made.
     const alpha = 0.34 + this.flash * 0.4;
     strokePlasticRamp(ctx, this.plate, this.color, 26, alpha);
+    // Printed chevrons marching up the plate — plastic ramp art.
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.17)';
+    ctx.lineWidth = 1.6;
+    ctx.lineCap = 'round';
+    let leftover = 0;
+    for (let i = 1; i < this.plate.length; i++) {
+      const a = this.plate[i - 1];
+      const b = this.plate[i];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len;
+      const uy = dy / len;
+      for (let d = 34 - leftover; d < len; d += 34) {
+        const px = a.x + ux * d;
+        const py = a.y + uy * d;
+        // Chevron opens along travel direction.
+        ctx.beginPath();
+        ctx.moveTo(px - ux * 5 - uy * 6, py - uy * 5 + ux * 6);
+        ctx.lineTo(px + ux * 4, py + uy * 4);
+        ctx.lineTo(px - ux * 5 + uy * 6, py - uy * 5 - ux * 6);
+        ctx.stroke();
+      }
+      leftover = (len - leftover) % 34;
+    }
+    ctx.restore();
     // Habitrail return rail (chrome).
     strokeMetalPath(ctx, this.habitrail, 4);
     // Backlit arrow at the mouth pointing up the ramp.

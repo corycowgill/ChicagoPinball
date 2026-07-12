@@ -1,6 +1,6 @@
 import Matter from 'matter-js';
 import { COLOR } from '../constants';
-import { softShadow } from '../Graphics';
+import { softShadow, decoStar } from '../Graphics';
 
 /** Stern-style pop bumper: a translucent skirt at playfield level, a chrome
  *  collar, and a domed lit cap on top with a flashing lamp inside. Pops the
@@ -82,8 +82,16 @@ export class PopBumper {
     ctx.arc(x, y, r * 0.55, 0, Math.PI * 2);
     ctx.fill();
 
-    // Specular pip
+    // Printed cap art: deco ring + Chicago star.
     ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.44, 0, Math.PI * 2);
+    ctx.stroke();
+    decoStar(ctx, x, y, r * 0.3, 'rgba(255, 255, 255, 0.7)');
+
+    // Specular pip
     ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
     ctx.beginPath();
     ctx.ellipse(x - r * 0.22, y - r * 0.32, r * 0.13, r * 0.07, -0.3, 0, Math.PI * 2);

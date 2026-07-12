@@ -313,14 +313,66 @@ export class Renderer {
       ctx.fillRect(0, PLAYFIELD_TOP, pf.playRight, PLAYFIELD_H - PLAYFIELD_TOP);
     }
 
+    // City-block shading — an aerial night map: alternating tonal blocks
+    // between the avenues, so the floor reads as illustrated wood, not void.
+    for (let bx = 0; bx < 8; bx++) {
+      for (let by = 0; by < 13; by++) {
+        const cool = (bx + by) % 2 === 0;
+        ctx.fillStyle = cool ? 'rgba(110, 150, 215, 0.030)' : 'rgba(255, 200, 140, 0.016)';
+        ctx.fillRect(bx * 60, 200 + by * 60, 60, 60);
+      }
+    }
+
     // Street grid — faint avenues over the whole playfield.
-    ctx.strokeStyle = 'rgba(120, 160, 220, 0.05)';
+    ctx.strokeStyle = 'rgba(120, 160, 220, 0.06)';
     ctx.lineWidth = 1;
     for (let x = 60; x < pf.playRight; x += 60) {
       ctx.beginPath();
       ctx.moveTo(x, PLAYFIELD_TOP + 10);
       ctx.lineTo(x, PLAYFIELD_H - 40);
       ctx.stroke();
+    }
+
+    // The Chicago River, flowing up the CENTRE SHOT LANE between the drop
+    // banks — the main shot is the river. Wavy-edged teal ribbon with a
+    // bridge where it passes between the banks.
+    {
+      ctx.save();
+      const g = ctx.createLinearGradient(0, 395, 0, 585);
+      g.addColorStop(0, 'rgba(70, 165, 215, 0.06)');
+      g.addColorStop(0.5, 'rgba(70, 165, 215, 0.14)');
+      g.addColorStop(1, 'rgba(70, 165, 215, 0.10)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(pf.playCenter - 10, 395);
+      ctx.bezierCurveTo(pf.playCenter - 22, 440, pf.playCenter - 12, 500, pf.playCenter - 24, 582);
+      ctx.lineTo(pf.playCenter + 24, 582);
+      ctx.bezierCurveTo(pf.playCenter + 12, 500, pf.playCenter + 22, 440, pf.playCenter + 10, 395);
+      ctx.closePath();
+      ctx.fill();
+      // Banksides.
+      ctx.strokeStyle = 'rgba(140, 205, 245, 0.14)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      // Bridge between the two drop banks.
+      ctx.strokeStyle = 'rgba(217, 164, 65, 0.30)';
+      ctx.lineWidth = 2;
+      for (const y of [466, 472]) {
+        ctx.beginPath();
+        ctx.moveTo(pf.playCenter - 30, y);
+        ctx.lineTo(pf.playCenter + 30, y);
+        ctx.stroke();
+      }
+      // Map label along the ribbon.
+      ctx.fillStyle = 'rgba(170, 215, 245, 0.20)';
+      ctx.font = 'bold 7px "Helvetica Neue", Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.save();
+      ctx.translate(pf.playCenter - 30, 540);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText('CHICAGO RIVER', 0, 0);
+      ctx.restore();
+      ctx.restore();
     }
     // Street-name decals along a couple of avenues.
     ctx.save();
