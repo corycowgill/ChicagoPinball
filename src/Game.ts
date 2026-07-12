@@ -1,7 +1,7 @@
 import Matter from 'matter-js';
 import { Physics } from './Physics';
 import { Playfield } from './scene/Playfield';
-import { Renderer, HudInfo } from './Renderer';
+import { HudInfo } from './Renderer';
 import { InputManager, VirtualKey } from './InputManager';
 import { Sound } from './Sound';
 import { GameState, ScoreEvent } from './types';
@@ -44,6 +44,15 @@ function newPlayer(): PlayerState {
     bossLit: false,
     replayAwarded: false,
   };
+}
+
+/** What the Game needs from a renderer (implemented by Renderer3D). */
+export interface GameRenderer {
+  pushToast(text: string, color?: string, ttl?: number): void;
+  triggerJackpotFlash(): void;
+  kick(amp: number): void;
+  tick(dtMs: number): void;
+  draw(pf: Playfield, hud: HudInfo): void;
 }
 
 /** How many end-of-ball bonus units each scoring event banks. */
@@ -93,7 +102,6 @@ export class Game {
   private physics!: Physics;
   /** Public for headless tests to read body angles. */
   playfield!: Playfield;
-  private renderer = new Renderer();
   private input = new InputManager();
   private sound = new Sound();
 
@@ -165,7 +173,7 @@ export class Game {
   private bossHp = BOSS_HP;
   private bossMsLeft = 0;
 
-  constructor(private ctx: CanvasRenderingContext2D, canvas?: HTMLElement) {
+  constructor(private renderer: GameRenderer, canvas?: HTMLElement) {
     this.rebuildWorld();
     if (canvas) {
       this.input.attachPointer(canvas, (x, y) => this.resolveTouchKey(x, y));
@@ -785,7 +793,7 @@ export class Game {
       bossHp: this.bossHp,
       bossMsLeft: this.bossMsLeft,
     };
-    this.renderer.draw(this.ctx, this.playfield, hud);
+    this.renderer.draw(this.playfield, hud);
   }
 
   private startGame() {

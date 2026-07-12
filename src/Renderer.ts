@@ -299,7 +299,7 @@ export class Renderer {
   /** Painted playfield art — Chicago-flag decal, skyline silhouette,
    *  art-deco sunburst, lakefront water, street names, insert rings. All
    *  of this renders once into the cached static layer. */
-  private drawFloorArt(ctx: CanvasRenderingContext2D, pf: Playfield) {
+  drawFloorArt(ctx: CanvasRenderingContext2D, pf: Playfield) {
     ctx.save();
     let seed = 7;
     const rand = () => {
@@ -1126,7 +1126,7 @@ export class Renderer {
 
   // ── Top apron (130 → 190) ──────────────────────────────────────────────
 
-  private drawTopApron(ctx: CanvasRenderingContext2D, _pf: import('./scene/Playfield').Playfield) {
+  drawTopApron(ctx: CanvasRenderingContext2D, _pf: import('./scene/Playfield').Playfield) {
     const grad = ctx.createLinearGradient(0, APRON_TOP, 0, PLAYFIELD_TOP);
     grad.addColorStop(0, '#040814');
     grad.addColorStop(1, COLOR.PF_DARK);
@@ -1158,7 +1158,7 @@ export class Renderer {
   }
 
   /** Bigger themed labels stacked ABOVE each Cubs/Bears/Bulls/Sox standup. */
-  private drawStandupLabels(ctx: CanvasRenderingContext2D, pf: import('./scene/Playfield').Playfield) {
+  drawStandupLabels(ctx: CanvasRenderingContext2D, pf: import('./scene/Playfield').Playfield) {
     const labels = [
       { text: 'CUBS',  color: COLOR.INSERT_YELLOW, target: pf.standups[0] },
       { text: 'BEARS', color: COLOR.INSERT_AMBER,  target: pf.standups[1] },
@@ -1194,7 +1194,7 @@ export class Renderer {
   }
 
   /** Static blue water pool beneath the Lake Michigan scoop (cached). */
-  private drawLakePool(ctx: CanvasRenderingContext2D, pf: Playfield) {
+  drawLakePool(ctx: CanvasRenderingContext2D, pf: Playfield) {
     const cx = pf.lakeMichiganScoop.x;
     const cy = pf.lakeMichiganScoop.y;
     ctx.save();
@@ -1230,7 +1230,7 @@ export class Renderer {
 
   // ── Playfield surface ─────────────────────────────────────────────────
 
-  private drawPlayfieldFloor(ctx: CanvasRenderingContext2D) {
+  drawPlayfieldFloor(ctx: CanvasRenderingContext2D) {
     const grad = ctx.createLinearGradient(0, PLAYFIELD_TOP, 0, PLAYFIELD_H);
     grad.addColorStop(0, COLOR.PF_DARK);
     grad.addColorStop(0.5, COLOR.PF_MID);
@@ -1269,7 +1269,7 @@ export class Renderer {
     ctx.fillRect(0, PLAYFIELD_TOP, PLAYFIELD_W, PLAYFIELD_H - PLAYFIELD_TOP);
   }
 
-  private drawPlayfieldDecals(ctx: CanvasRenderingContext2D, pf: Playfield) {
+  drawPlayfieldDecals(ctx: CanvasRenderingContext2D, pf: Playfield) {
     ctx.save();
     ctx.font = 'bold 11px "Helvetica Neue", Arial, sans-serif';
     ctx.textAlign = 'center';

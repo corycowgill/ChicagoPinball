@@ -9,6 +9,7 @@ export class PopBumper {
   readonly body: Matter.Body;
   readonly radius: number;
   private flash = 0;
+  get flashLevel(): number { return this.flash; }
   private color: string;
 
   constructor(x: number, y: number, radius = 24, color = COLOR.INSERT_AMBER) {
