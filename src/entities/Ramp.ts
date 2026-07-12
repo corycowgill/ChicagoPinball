@@ -40,7 +40,9 @@ export class Ramp {
     minSpeed?: number;
   }) {
     const mouth = opts.plate[0];
-    this.entry = Matter.Bodies.circle(mouth.x, mouth.y, 15, {
+    // r16: a whisker more generous than the old 15 — near-misses that
+    // clipped the funnel post now catch the mouth.
+    this.entry = Matter.Bodies.circle(mouth.x, mouth.y, 16, {
       isStatic: true,
       isSensor: true,
       label: `${opts.label}-entry`,
@@ -54,7 +56,9 @@ export class Ramp {
     this.arrowAngle = opts.arrowAngle;
     this.label = opts.label;
     this.themeText = opts.themeText;
-    this.minSpeed = opts.minSpeed ?? 6;
+    // 4.5 (was 6): a firm-but-not-perfect flip makes the ramp — misses
+    // now mean genuinely soft shots, and those get the flap reject.
+    this.minSpeed = opts.minSpeed ?? 4.5;
   }
 
   /** True if the ball is moving up fast enough to make the ramp. */
