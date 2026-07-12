@@ -57,6 +57,10 @@ export interface HudInfo {
   tilted: boolean;
   kickbackLit: boolean;
   mysteryLit: boolean;
+  /** EL EXPRESS right-outlane rescue is armed. */
+  expressLit: boolean;
+  /** Countdown value of the pending sport-mode finale shot (0 = none). */
+  hurryUpValue: number;
   bonusX: number;
   ballSaveMs: number;
   highScore: number;
