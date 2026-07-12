@@ -772,6 +772,7 @@ export class Game {
       tourKind: this.tourIdx >= 0 ? TOUR_STOPS[this.tourIdx].kind : null,
       tourLetter: this.tourIdx >= 0 ? TOUR_STOPS[this.tourIdx].letter ?? null : null,
       tourMsLeft: this.tourMsLeft,
+      tourIdx: this.tourIdx,
       tiltHeat: this.tiltHeat,
       tilted: this.tilted,
       kickbackLit: this.kickbackLit,

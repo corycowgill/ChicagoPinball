@@ -2,7 +2,7 @@ import { COLOR, PLAYFIELD_W, PLAYFIELD_H, CHICAGO, BOSS_HP } from './constants';
 import { Dmd } from './Dmd';
 import { Playfield, PLAYFIELD_TOP } from './scene/Playfield';
 import { GameState } from './types';
-import { metalPost, strokeMetalPath, insertArrow, drawCapone } from './Graphics';
+import { metalPost, strokeMetalPath, insertArrow, drawCapone, decoStar } from './Graphics';
 
 interface Toast {
   text: string;
@@ -41,6 +41,8 @@ export interface HudInfo {
   tourKind: string | null;
   tourLetter: string | null;
   tourMsLeft: number;
+  /** Index into the tour itinerary, -1 when no tour is running. */
+  tourIdx: number;
   tiltHeat: number;
   tilted: boolean;
   kickbackLit: boolean;
@@ -123,6 +125,7 @@ export class Renderer {
     // Static under-layer: top apron band, floor + art, lake pool, wireform.
     if (this.staticUnder) ctx.drawImage(this.staticUnder, 0, 0, PLAYFIELD_W, PLAYFIELD_H);
     this.drawChicagoStrip(ctx, pf);
+    this.drawTourLadder(ctx, hud);
     // Capone looms over the playfield during the showdown.
     if (hud.bossActive) drawCapone(ctx, pf.playCenter, 480, 1.9, 0.14);
     // Animated lake shimmer over the static pool.
@@ -443,6 +446,65 @@ export class Renderer {
       ctx.restore();
     }
 
+    // The lower field is Lake Michigan at night: a deep blue wash covered
+    // in flowing wave linework (the reference-machine water engraving).
+    {
+      ctx.save();
+      const wash = ctx.createLinearGradient(0, 560, 0, PLAYFIELD_H);
+      wash.addColorStop(0, 'rgba(25, 60, 130, 0)');
+      wash.addColorStop(0.35, 'rgba(25, 60, 130, 0.12)');
+      wash.addColorStop(1, 'rgba(18, 45, 105, 0.18)');
+      ctx.fillStyle = wash;
+      ctx.fillRect(0, 560, pf.playRight, PLAYFIELD_H - 560);
+      ctx.lineWidth = 1.2;
+      for (let i = 0; i < 13; i++) {
+        const y0 = 585 + i * 27 + rand() * 8;
+        ctx.strokeStyle = `rgba(150, 200, 240, ${0.045 + (i % 3) * 0.017})`;
+        ctx.beginPath();
+        for (let x = 8; x <= pf.playRight - 8; x += 16) {
+          const y =
+            y0 + Math.sin(x * 0.021 + i * 1.7) * 6 + Math.sin(x * 0.052 + i * 0.9) * 2.6;
+          if (x === 8) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+      // A few curling crests.
+      ctx.strokeStyle = 'rgba(170, 215, 250, 0.10)';
+      for (let i = 0; i < 6; i++) {
+        const cx2 = 40 + rand() * (pf.playRight - 80);
+        const cy2 = 600 + rand() * 280;
+        ctx.beginPath();
+        ctx.arc(cx2, cy2, 7 + rand() * 5, Math.PI * 1.1, Math.PI * 1.9);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Buildings crowding both side edges (above the slingshot zone).
+    {
+      ctx.save();
+      for (const side of [0, 1]) {
+        let y = 262;
+        while (y < 585) {
+          const h = 26 + rand() * 30;
+          const w = 8 + rand() * 8;
+          const x = side === 0 ? 2 : pf.playRight - 2 - w;
+          ctx.fillStyle = 'rgba(6, 10, 22, 0.75)';
+          ctx.fillRect(x, y, w, h);
+          ctx.strokeStyle = 'rgba(140, 180, 240, 0.08)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(x, y, w, h);
+          ctx.fillStyle = 'rgba(255, 214, 130, 0.30)';
+          for (let wy = y + 4; wy < y + h - 3; wy += 7) {
+            if (rand() < 0.55) ctx.fillRect(x + 2 + rand() * (w - 5), wy, 1.5, 2.2);
+          }
+          y += h + 4;
+        }
+      }
+      ctx.restore();
+    }
+
     // Skyline silhouette across the strip above the slingshots — the city
     // seen from the lake, with sparse lit windows and a sky-glow roofline.
     {
@@ -731,22 +793,79 @@ export class Renderer {
     }
     this.drawCTATrain(ctx, performance.now());
 
-    // Brand plate — deco letterspaced title on the backbox glass.
+    // Marquee sign — WINDY CITY / SHOWDOWN in a gold frame, flanked by
+    // flag stars, with floodlight clusters washing it from the corners.
     ctx.save();
-    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '5px';
+    // Floodlights.
+    for (const [fx, dir] of [
+      [46, 1],
+      [PLAYFIELD_W - 46, -1],
+    ] as const) {
+      // Light cone toward the marquee.
+      const cone = ctx.createLinearGradient(fx, 10, fx + dir * 130, 30);
+      cone.addColorStop(0, 'rgba(255, 245, 220, 0.10)');
+      cone.addColorStop(1, 'rgba(255, 245, 220, 0)');
+      ctx.fillStyle = cone;
+      ctx.beginPath();
+      ctx.moveTo(fx, 8);
+      ctx.lineTo(fx + dir * 150, 2);
+      ctx.lineTo(fx + dir * 150, 44);
+      ctx.lineTo(fx, 26);
+      ctx.closePath();
+      ctx.fill();
+      // 3×3 lamp grid.
+      ctx.fillStyle = '#fff6e0';
+      ctx.shadowColor = '#fff6e0';
+      ctx.shadowBlur = 6;
+      for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 3; c++) {
+          ctx.beginPath();
+          ctx.arc(fx - 7 + c * 7, 8 + r * 7, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#1a2030';
+      ctx.fillRect(fx - 11, 3, 22, 2);
+    }
+    // Sign body.
+    const mx = PLAYFIELD_W / 2;
+    ctx.fillStyle = '#0a0d18';
+    ctx.beginPath();
+    ctx.roundRect(mx - 118, 4, 236, 48, 5);
+    ctx.fill();
+    ctx.strokeStyle = COLOR.BRASS;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255, 235, 190, 0.4)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.roundRect(mx - 113, 8, 226, 40, 4);
+    ctx.stroke();
+    // Text.
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '3px';
     ctx.shadowColor = COLOR.FLAG_RED;
-    ctx.shadowBlur = 10;
+    ctx.shadowBlur = 12;
     ctx.fillStyle = COLOR.FLAG_RED;
-    ctx.font = 'bold 13px "Helvetica Neue", Arial, sans-serif';
-    ctx.fillText('CHICAGO', PLAYFIELD_W / 2, 11);
+    ctx.font = 'bold 19px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText('WINDY CITY', mx + 1, 19);
     ctx.shadowBlur = 0;
-    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '2px';
-    ctx.fillStyle = COLOR.BRASS;
-    ctx.font = '7px "Helvetica Neue", Arial, sans-serif';
-    ctx.fillText('THE WINDY CITY', PLAYFIELD_W / 2, 22);
+    ctx.strokeStyle = 'rgba(255, 240, 240, 0.75)';
+    ctx.lineWidth = 0.7;
+    ctx.strokeText('WINDY CITY', mx + 1, 19);
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '6px';
+    ctx.shadowColor = COLOR.FLAG_BLUE;
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = COLOR.FLAG_BLUE;
+    ctx.font = 'bold 13px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText('SHOWDOWN', mx + 3, 39);
     (ctx as unknown as { letterSpacing?: string }).letterSpacing = '0px';
+    ctx.shadowBlur = 0;
+    // Flag stars flanking the sign.
+    decoStar(ctx, mx - 132, 28, 8, COLOR.FLAG_RED);
+    decoStar(ctx, mx + 132, 28, 8, COLOR.FLAG_RED);
     ctx.restore();
 
     // Bottom edge — chrome bezel between backbox and HUD.
@@ -941,25 +1060,66 @@ export class Renderer {
    *  AFTER the static under-layer, which paints that region). */
   private drawChicagoStrip(ctx: CanvasRenderingContext2D, pf: Playfield) {
     const lit = pf.bank.litMask();
-    const cellW = 20;
-    const totalW = CHICAGO.length * cellW + (CHICAGO.length - 1) * 4;
-    const startX = (PLAYFIELD_W - totalW) / 2;
+    const spacing = 26;
+    const startX = (PLAYFIELD_W - (CHICAGO.length - 1) * spacing) / 2;
+    const cy = HUD_BOT + 12;
     ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     for (let i = 0; i < CHICAGO.length; i++) {
-      const x = startX + i * (cellW + 4);
-      const cy = HUD_BOT + 4;
-      ctx.fillStyle = lit[i] ? '#0a3848' : '#0a1224';
-      ctx.fillRect(x, cy, cellW, 16);
-      ctx.shadowColor = COLOR.FLAG_BLUE;
-      ctx.shadowBlur = lit[i] ? 14 : 0;
-      ctx.strokeStyle = lit[i] ? COLOR.FLAG_BLUE : 'rgba(127, 209, 232, 0.3)';
+      const x = startX + i * spacing;
+      // Round lamp insert — white when lit with a red glow ring.
+      ctx.shadowColor = COLOR.FLAG_RED;
+      ctx.shadowBlur = lit[i] ? 12 : 0;
+      ctx.fillStyle = lit[i] ? 'rgba(245, 250, 255, 0.95)' : 'rgba(12, 20, 38, 0.9)';
+      ctx.beginPath();
+      ctx.arc(x, cy, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = lit[i] ? COLOR.FLAG_RED : 'rgba(127, 209, 232, 0.35)';
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(x, cy, cellW, 16);
-      ctx.fillStyle = lit[i] ? '#ffffff' : 'rgba(255, 255, 255, 0.45)';
-      ctx.font = 'bold 12px "Helvetica Neue", Arial, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(CHICAGO[i], x + cellW / 2, cy + 8);
+      ctx.stroke();
+      ctx.fillStyle = lit[i] ? '#123a6e' : 'rgba(160, 200, 235, 0.5)';
+      ctx.font = 'bold 11px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText(CHICAGO[i], x, cy + 0.5);
+    }
+    ctx.restore();
+  }
+
+  /** City Tour ladder — labelled inserts with star lamps, like the mode
+   *  ladder on the reference machine. Completed stops burn solid, the
+   *  current stop blinks. */
+  private drawTourLadder(ctx: CanvasRenderingContext2D, hud: HudInfo) {
+    const names = ['WILLIS', 'THE L', 'PIER', 'BEAN', 'WRIGLEY'];
+    const x = PLAYFIELD_W / 2 - 34;
+    const y0 = 636;
+    const blink = Math.sin(performance.now() / 180) > -0.2;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < names.length; i++) {
+      const y = y0 + i * 15;
+      const done = hud.tourIdx > i;
+      const current = hud.tourIdx === i;
+      // Insert plate.
+      ctx.fillStyle = current && blink ? 'rgba(240, 246, 255, 0.34)' : 'rgba(235, 242, 250, 0.10)';
+      ctx.strokeStyle = 'rgba(127, 209, 232, 0.35)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(x, y, 68, 12, 3);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = current ? '#eaf4ff' : 'rgba(200, 225, 250, 0.55)';
+      ctx.font = 'bold 7px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText(names[i], x + 34, y + 6.5);
+      // Star lamp.
+      const on = done || (current && blink);
+      if (on) {
+        ctx.shadowColor = COLOR.FLAG_RED;
+        ctx.shadowBlur = 8;
+      }
+      decoStar(ctx, x - 9, y + 6, 5, on ? COLOR.FLAG_RED : 'rgba(230, 41, 62, 0.22)');
+      ctx.shadowBlur = 0;
     }
     ctx.restore();
   }
