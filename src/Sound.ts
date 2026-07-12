@@ -258,13 +258,78 @@ export class Sound {
     this.tone(233, 500, { type: 'sawtooth', vol: 0.35 });
   }
 
-  tourStop() {
+  sportShot() {
     this.tone(587, 120, { vol: 0.3 });
     this.tone(880, 200, { vol: 0.3, delayMs: 110 });
   }
 
-  tourComplete() {
+  sportComplete() {
     [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone(f, 220, { vol: 0.28, delayMs: i * 100 }));
+    this.crowd(900, 0.22);
+  }
+
+  // ── Sport-themed stingers ────────────────────────────────────────────────
+
+  /** Stadium crowd swell — filtered noise with a slow envelope. */
+  crowd(durMs = 1200, vol = 0.18) {
+    if (!this.ctx || !this.master || this.muted) return;
+    const t0 = this.ctx.currentTime;
+    const len = Math.floor((durMs / 1000) * this.ctx.sampleRate);
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 950;
+    filter.Q.value = 0.4;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.001, t0);
+    gain.gain.exponentialRampToValueAtTime(vol, t0 + durMs / 2500);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + durMs / 1000);
+    src.connect(filter).connect(gain).connect(this.master);
+    src.start(t0);
+  }
+
+  /** Ballpark organ sting — "charge!" style triad walk-up. */
+  organSting() {
+    const notes = [392, 523, 659, 784, 659, 784];
+    notes.forEach((f, i) => {
+      this.tone(f, i === notes.length - 1 ? 340 : 130, { type: 'square', vol: 0.14, delayMs: i * 120 });
+      this.tone(f / 2, i === notes.length - 1 ? 340 : 130, { type: 'square', vol: 0.1, delayMs: i * 120 });
+    });
+  }
+
+  /** Hockey goal horn — long detuned blast. */
+  goalHorn() {
+    this.tone(233, 950, { type: 'sawtooth', vol: 0.3 });
+    this.tone(238, 950, { type: 'sawtooth', vol: 0.3 });
+    this.tone(116, 950, { type: 'square', vol: 0.18 });
+    this.crowd(1400, 0.24);
+  }
+
+  /** Basketball buzzer + the swish. */
+  buzzer() {
+    this.tone(310, 550, { type: 'square', vol: 0.28 });
+    this.tone(315, 550, { type: 'square', vol: 0.2 });
+    this.noise(180, { vol: 0.25, freq: 5200, q: 0.7, delayMs: 560 }); // net swish
+  }
+
+  /** Referee whistle — two short chirps. */
+  whistle() {
+    for (const d of [0, 160]) {
+      this.tone(2350, 120, { type: 'square', vol: 0.16, delayMs: d });
+      this.tone(2410, 120, { type: 'square', vol: 0.12, delayMs: d });
+      this.noise(110, { vol: 0.1, freq: 2400, q: 6, delayMs: d });
+    }
+  }
+
+  /** The L rattling past the skyline. */
+  trainPass() {
+    for (let i = 0; i < 6; i++) this.noise(90, { vol: 0.08, freq: 140 + (i % 2) * 60, q: 0.8, delayMs: i * 130 });
+    this.tone(660, 200, { type: 'triangle', vol: 0.05, delayMs: 260 }); // crossing bell
+    this.tone(660, 200, { type: 'triangle', vol: 0.05, delayMs: 560 });
   }
 
   kickback() {
