@@ -91,10 +91,11 @@ export class Renderer3D {
     this.overlay = uiCanvas.getContext('2d')!;
     this.overlay.scale(2, 2); // ui canvas is 1080×1920 for crisp text
 
-    // Player's-eye view down the table (the reference photo's framing).
-    this.camera = new THREE.PerspectiveCamera(45, 540 / 960, 10, 4000);
-    this.camera.position.set(PLAYFIELD_W / 2, 680, PLAYFIELD_H + 350);
-    this.camera.lookAt(PLAYFIELD_W / 2, -30, 500);
+    // High, near-top-down view filling the frame (the reference photo's
+    // framing): the whole table plus the backbox head, slight perspective.
+    this.camera = new THREE.PerspectiveCamera(40, 540 / 960, 10, 4000);
+    this.camera.position.set(PLAYFIELD_W / 2, 1010, PLAYFIELD_H + 210);
+    this.camera.lookAt(PLAYFIELD_W / 2, -20, 505);
 
     this.scene.background = new THREE.Color('#04050c');
     this.scene.fog = new THREE.Fog('#04050c', 1800, 3200);
@@ -193,9 +194,14 @@ export class Renderer3D {
       side.position.set(sx, 30, PLAYFIELD_H / 2);
       this.scene.add(side);
     }
-    const backWood = new THREE.Mesh(new THREE.BoxGeometry(PLAYFIELD_W + 48, 90, 16), woodMat);
-    backWood.position.set(PLAYFIELD_W / 2, 30, 122);
-    this.scene.add(backWood);
+    // Backbox head: a standing cabinet at the top of the table carrying the
+    // marquee art and the DMD on its face.
+    const backbox = new THREE.Mesh(
+      new THREE.BoxGeometry(PLAYFIELD_W + 48, 230, 20),
+      woodMat,
+    );
+    backbox.position.set(PLAYFIELD_W / 2, 105, 100);
+    this.scene.add(backbox);
 
     // Rails / posts / walls from the physics bodies.
     const railMat = new THREE.MeshStandardMaterial({
@@ -400,13 +406,21 @@ export class Renderer3D {
     plunger.position.set(pf.plunger.body.position.x, 10, pf.plunger.body.position.y);
     this.scene.add(plunger);
 
-    // Apron.
+    // Apron — a painted sloped panel covering the whole drain area (the
+    // shooter lane to its right stays open so the ball is visible at rest).
+    const apronCanvas = document.createElement('canvas');
+    apronCanvas.width = 960;
+    apronCanvas.height = 160;
+    this.paintApron(apronCanvas.getContext('2d')!);
+    const apronTex = new THREE.CanvasTexture(apronCanvas);
+    apronTex.colorSpace = THREE.SRGBColorSpace;
     const apron = new THREE.Mesh(
-      new THREE.BoxGeometry(PLAYFIELD_W, 26, 66),
-      new THREE.MeshStandardMaterial({ color: 0x6a1220, roughness: 0.5 }),
+      new THREE.PlaneGeometry(PLAYFIELD_W - 60, 78),
+      new THREE.MeshStandardMaterial({ map: apronTex, roughness: 0.55, metalness: 0.1 }),
     );
-    apron.position.set(PLAYFIELD_W / 2 - 30, 12, PLAYFIELD_H - 30);
-    apron.scale.x = (PLAYFIELD_W - 60) / PLAYFIELD_W;
+    // Horizontal, then tipped up toward the player like a real apron.
+    apron.rotation.x = -Math.PI / 2 + 0.3;
+    apron.position.set(PLAYFIELD_W / 2 - 30, 14, PLAYFIELD_H - 42);
     this.scene.add(apron);
 
     // Backbox: marquee panel + DMD panel.
@@ -417,17 +431,19 @@ export class Renderer3D {
     const marqueeTex = new THREE.CanvasTexture(marqueeCanvas);
     marqueeTex.colorSpace = THREE.SRGBColorSpace;
     const marquee = new THREE.Mesh(
-      new THREE.PlaneGeometry(PLAYFIELD_W + 40, 130),
+      new THREE.PlaneGeometry(PLAYFIELD_W + 40, 132),
       new THREE.MeshBasicMaterial({ map: marqueeTex }),
     );
-    marquee.position.set(PLAYFIELD_W / 2, 160, 108);
+    marquee.position.set(PLAYFIELD_W / 2, 152, 110.5);
     this.scene.add(marquee);
     const dmdPanel = new THREE.Mesh(
-      new THREE.PlaneGeometry(PLAYFIELD_W - 8, 66),
+      new THREE.PlaneGeometry(PLAYFIELD_W - 20, 64),
       new THREE.MeshBasicMaterial({ map: this.dmdTexture }),
     );
-    dmdPanel.position.set(PLAYFIELD_W / 2, 62, 112);
-    dmdPanel.rotation.x = -0.18;
+    // Sits proud of the backbox face — a tilt any larger buries the top
+    // edge inside the cabinet and the camera clips the first dot rows.
+    dmdPanel.position.set(PLAYFIELD_W / 2, 48, 113);
+    dmdPanel.rotation.x = -0.06;
     this.scene.add(dmdPanel);
 
     // Lamp inserts — real emissive discs on the wood.
@@ -449,8 +465,10 @@ export class Renderer3D {
       this.lamps.push({ mesh, mat, kind });
     };
     pf.rollovers.forEach((r, i) => lamp(r.x, r.y, 8, '#5cff9a', { t: 'rollover', i }));
+    // CHICAGO letter inserts run across the open floor above the flag
+    // banner (the top apron already carries the SKILL SHOT decal).
     for (let i = 0; i < CHICAGO.length; i++) {
-      lamp(PLAYFIELD_W / 2 - ((CHICAGO.length - 1) * 26) / 2 + i * 26, 152, 8, '#e6293e', {
+      lamp(PLAYFIELD_W / 2 - ((CHICAGO.length - 1) * 26) / 2 + i * 26, 528, 8, '#e6293e', {
         t: 'chicago',
         i,
       });
@@ -516,6 +534,57 @@ export class Renderer3D {
     ctx.shadowBlur = 0;
     decoStar(ctx, mx - 172, 60, 13, COLOR.FLAG_RED);
     decoStar(ctx, mx + 172, 60, 13, COLOR.FLAG_RED);
+  }
+
+  /** Painted apron: pinstriped panel with instruction cards, Stern-style. */
+  private paintApron(ctx: CanvasRenderingContext2D) {
+    ctx.scale(2, 2);
+    const W = 480;
+    const H = 80;
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#3c0b14');
+    g.addColorStop(1, '#24060c');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    // Double gold pinstripe border.
+    ctx.strokeStyle = COLOR.BRASS;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(6, 6, W - 12, H - 12);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(217,164,65,0.5)';
+    ctx.strokeRect(11, 11, W - 22, H - 22);
+    // Instruction cards left and right of the drain — inset enough that the
+    // camera's widening near-field doesn't crop them at the frame edges.
+    for (const cx of [132, W - 132]) {
+      ctx.fillStyle = '#e8e2d0';
+      ctx.fillRect(cx - 42, 20, 84, 42);
+      ctx.strokeStyle = '#8a2030';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(cx - 42, 20, 84, 42);
+      ctx.fillStyle = '#8a2030';
+      ctx.font = 'bold 8px "Helvetica Neue", Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(cx < W / 2 ? 'FREE PLAY' : '3 BALLS', cx, 30);
+      // Faux fine print.
+      ctx.fillStyle = 'rgba(40,40,50,0.55)';
+      for (let ln = 0; ln < 4; ln++) {
+        ctx.fillRect(cx - 34, 36 + ln * 6, 68 - ((ln * 23) % 20), 2);
+      }
+    }
+    // Center badge.
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '3px';
+    ctx.fillStyle = COLOR.BRASS;
+    ctx.font = 'bold 13px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText('WINDY CITY', W / 2, 32);
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '2px';
+    ctx.fillStyle = 'rgba(230,220,200,0.75)';
+    ctx.font = 'bold 9px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText('SHOWDOWN', W / 2, 48);
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '0px';
+    decoStar(ctx, W / 2 - 62, 40, 7, COLOR.FLAG_RED);
+    decoStar(ctx, W / 2 + 62, 40, 7, COLOR.FLAG_RED);
   }
 
   // ── Per-frame sync + render ──────────────────────────────────────────────
@@ -591,12 +660,13 @@ export class Renderer3D {
 
     // Camera shake.
     const baseX = PLAYFIELD_W / 2;
+    const baseY = 1010;
     if (this.shakeMs > 0 && this.shakeAmp > 0) {
       this.camera.position.x = baseX + (Math.random() - 0.5) * 2 * this.shakeAmp;
-      this.camera.position.y = 640 + (Math.random() - 0.5) * this.shakeAmp;
+      this.camera.position.y = baseY + (Math.random() - 0.5) * this.shakeAmp;
     } else {
       this.camera.position.x = baseX;
-      this.camera.position.y = 640;
+      this.camera.position.y = baseY;
     }
 
     // DMD texture.
