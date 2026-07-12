@@ -1,12 +1,42 @@
 /** All-synthesized sound effects (WebAudio, no assets). The AudioContext is
  *  created lazily on the first user gesture — browsers block audio before
  *  interaction — and every play call is a no-op until then. */
+
+export type MusicMode =
+  | 'off'
+  | 'main'
+  | 'action'
+  | 'baseball'
+  | 'football'
+  | 'basketball'
+  | 'hockey'
+  | 'soccer';
+
+/** Per-mode 8-step grooves: bass line + optional lead + hat pattern.
+ *  0 = rest. Each sport mode has its own musical identity. */
+const GROOVES: Record<Exclude<MusicMode, 'off'>, { bass: number[]; lead: number[]; hat: number[]; bpm: number }> = {
+  // Chicago blues shuffle.
+  main: { bass: [110, 0, 131, 110, 87, 0, 131, 147], lead: [0, 0, 0, 0, 0, 0, 0, 0], hat: [0, 0, 1, 0, 0, 0, 1, 0], bpm: 120 },
+  // Multiball / wizard — driving.
+  action: { bass: [110, 110, 165, 110, 175, 110, 165, 147], lead: [440, 0, 440, 0, 523, 0, 440, 392], hat: [1, 0, 1, 0, 1, 0, 1, 1], bpm: 120 },
+  // Ballpark organ — major-key bounce.
+  baseball: { bass: [131, 0, 165, 0, 196, 0, 165, 0], lead: [523, 659, 784, 659, 523, 0, 659, 0], hat: [0, 0, 1, 0, 0, 0, 1, 0], bpm: 112 },
+  // Marching cadence — snare-forward.
+  football: { bass: [98, 98, 0, 98, 123, 0, 98, 0], lead: [0, 0, 392, 0, 0, 0, 330, 0], hat: [1, 1, 1, 0, 1, 1, 1, 1], bpm: 116 },
+  // Uptempo funk.
+  basketball: { bass: [110, 0, 110, 131, 0, 110, 147, 131], lead: [0, 440, 0, 0, 523, 0, 0, 587], hat: [1, 0, 1, 1, 0, 1, 1, 0], bpm: 126 },
+  // Arena rock drive.
+  hockey: { bass: [82, 82, 82, 98, 82, 82, 110, 98], lead: [330, 0, 0, 392, 0, 0, 440, 0], hat: [1, 0, 1, 0, 1, 0, 1, 0], bpm: 132 },
+  // Terrace chant sway.
+  soccer: { bass: [87, 0, 0, 110, 0, 0, 131, 0], lead: [349, 0, 440, 0, 523, 440, 0, 349], hat: [0, 0, 1, 0, 0, 0, 1, 0], bpm: 108 },
+};
+
 export class Sound {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   muted = false;
 
-  private musicMode: 'off' | 'main' | 'action' = 'off';
+  private musicMode: MusicMode = 'off';
   private musicStep = 0;
   private musicTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -35,30 +65,48 @@ export class Sound {
     return this.muted;
   }
 
-  // ── Music — a state-driven 8-step groove (main play vs. multiball/boss). ──
+  // ── Music — state-driven 8-step grooves: main play, multiball/wizard
+  //    action, and one theme per sport mode. ──
 
-  startMusic(mode: 'main' | 'action') {
+  startMusic(mode: Exclude<MusicMode, 'off'>) {
+    if (this.musicMode === mode) return;
     this.musicMode = mode;
-    if (!this.musicTimer) {
-      this.musicTimer = setInterval(() => this.musicTick(), 250); // 8ths @ 120 BPM
-    }
+    this.musicStep = 0;
+    this.retuneMusicTimer();
   }
 
   stopMusic() {
     this.musicMode = 'off';
   }
 
+  /** Each groove carries its own tempo — rebuild the interval to match. */
+  private retuneMusicTimer() {
+    if (this.musicTimer) {
+      clearInterval(this.musicTimer);
+      this.musicTimer = null;
+    }
+    if (this.musicMode === 'off') return;
+    const bpm = GROOVES[this.musicMode].bpm;
+    this.musicTimer = setInterval(() => this.musicTick(), Math.round(30000 / bpm)); // 8th notes
+  }
+
   private musicTick() {
     if (this.musicMode === 'off' || this.muted || !this.ctx) return;
+    const groove = GROOVES[this.musicMode];
     const step = this.musicStep++ % 8;
-    const MAIN_BASS = [110, 0, 131, 110, 87, 0, 131, 147];
-    const ACTION_BASS = [110, 110, 165, 110, 175, 110, 165, 147];
-    const bass = (this.musicMode === 'main' ? MAIN_BASS : ACTION_BASS)[step];
+    const bass = groove.bass[step];
     if (bass) this.tone(bass, 210, { type: 'triangle', vol: 0.11 });
-    if (this.musicMode === 'action' && step % 2 === 0) {
-      this.tone((bass || 110) * 4, 90, { type: 'square', vol: 0.04 });
+    const lead = groove.lead[step];
+    if (lead) {
+      // Sport leads use a reedy square (organ-adjacent); action doubles up.
+      this.tone(lead, 120, { type: 'square', vol: 0.045 });
+      if (this.musicMode === 'baseball') this.tone(lead * 2, 100, { type: 'square', vol: 0.02 });
     }
-    if (step % 4 === 2) this.noise(28, { vol: 0.05, freq: 6500, q: 1.5 }); // hat
+    if (groove.hat[step]) this.noise(28, { vol: 0.05, freq: 6500, q: 1.5 });
+    // Football gets its snare on the back beats.
+    if (this.musicMode === 'football' && (step === 2 || step === 6)) {
+      this.noise(55, { vol: 0.09, freq: 1800, q: 0.9 });
+    }
   }
 
   /** Announcer callout via speech synthesis. `priority` interrupts. */
