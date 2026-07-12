@@ -264,6 +264,158 @@ export function strokeGuideRail(
   ctx.restore();
 }
 
+/** Noir Capone portrait — fedora, hat-shadowed eyes, cigar, pinstripes.
+ *  Drawn centred on (cx, cy) ≈ the bridge of the nose; roughly 100×170
+ *  units at scale 1. */
+export function drawCapone(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  s = 1,
+  alpha = 1,
+) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(s, s);
+  ctx.globalAlpha = alpha;
+  ctx.lineJoin = 'round';
+
+  // Suit shoulders — pinstriped navy.
+  ctx.beginPath();
+  ctx.moveTo(-50, 84);
+  ctx.quadraticCurveTo(-46, 40, -26, 32);
+  ctx.lineTo(26, 32);
+  ctx.quadraticCurveTo(46, 40, 50, 84);
+  ctx.closePath();
+  ctx.fillStyle = '#141b2c';
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  ctx.strokeStyle = 'rgba(190, 200, 220, 0.22)';
+  ctx.lineWidth = 1;
+  for (let x = -48; x <= 48; x += 7) {
+    ctx.beginPath();
+    ctx.moveTo(x, 30);
+    ctx.lineTo(x + 4, 86);
+    ctx.stroke();
+  }
+  ctx.restore();
+  // Shirt + red tie.
+  ctx.fillStyle = '#e8ecf2';
+  ctx.beginPath();
+  ctx.moveTo(-10, 33);
+  ctx.lineTo(10, 33);
+  ctx.lineTo(0, 60);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#b01a28';
+  ctx.beginPath();
+  ctx.moveTo(-4, 36);
+  ctx.lineTo(4, 36);
+  ctx.lineTo(3, 58);
+  ctx.lineTo(0, 66);
+  ctx.lineTo(-3, 58);
+  ctx.closePath();
+  ctx.fill();
+
+  // Neck + face.
+  ctx.fillStyle = '#dcae83';
+  ctx.fillRect(-9, 16, 18, 18);
+  ctx.beginPath();
+  ctx.ellipse(0, -2, 24, 28, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Jaw shading.
+  ctx.fillStyle = 'rgba(120, 70, 40, 0.25)';
+  ctx.beginPath();
+  ctx.ellipse(0, 12, 18, 12, 0, 0, Math.PI);
+  ctx.fill();
+  // Ears.
+  ctx.fillStyle = '#d2a077';
+  ctx.beginPath();
+  ctx.ellipse(-24, 0, 4, 7, 0, 0, Math.PI * 2);
+  ctx.ellipse(24, 0, 4, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Hat shadow across the eyes — the noir band.
+  ctx.fillStyle = 'rgba(10, 12, 20, 0.62)';
+  ctx.beginPath();
+  ctx.moveTo(-24, -14);
+  ctx.lineTo(24, -14);
+  ctx.lineTo(22, 2);
+  ctx.lineTo(-22, 2);
+  ctx.closePath();
+  ctx.fill();
+  // Eye glints in the shadow.
+  ctx.fillStyle = 'rgba(255, 245, 220, 0.85)';
+  ctx.fillRect(-11, -5, 5, 1.6);
+  ctx.fillRect(6, -5, 5, 1.6);
+
+  // Nose + smirk.
+  ctx.strokeStyle = 'rgba(110, 60, 35, 0.7)';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(0, -2);
+  ctx.lineTo(-2, 8);
+  ctx.moveTo(-8, 15);
+  ctx.quadraticCurveTo(2, 19, 10, 14);
+  ctx.stroke();
+  // The scar (left cheek).
+  ctx.strokeStyle = 'rgba(150, 60, 50, 0.65)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(-20, 6);
+  ctx.lineTo(-13, 16);
+  ctx.stroke();
+
+  // Cigar with ember + smoke.
+  ctx.save();
+  ctx.translate(11, 15);
+  ctx.rotate(0.12);
+  ctx.fillStyle = '#6b3a1f';
+  ctx.fillRect(0, -2.4, 20, 4.8);
+  ctx.fillStyle = '#ff7b2e';
+  ctx.beginPath();
+  ctx.arc(20.5, 0, 2.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = 'rgba(200, 210, 225, 0.35)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(32, 14);
+  ctx.quadraticCurveTo(40, 2, 34, -10);
+  ctx.quadraticCurveTo(29, -20, 36, -30);
+  ctx.stroke();
+
+  // Fedora — brim, crown, red band.
+  ctx.fillStyle = '#10131c';
+  ctx.beginPath();
+  ctx.ellipse(0, -17, 35, 9, -0.04, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(-23, -18);
+  ctx.quadraticCurveTo(-24, -44, -12, -48);
+  ctx.quadraticCurveTo(2, -52, 16, -47);
+  ctx.quadraticCurveTo(25, -42, 22, -18);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#a01522';
+  ctx.beginPath();
+  ctx.moveTo(-23, -28);
+  ctx.lineTo(22, -28);
+  ctx.lineTo(22, -20);
+  ctx.lineTo(-23, -20);
+  ctx.closePath();
+  ctx.fill();
+  // Brim highlight.
+  ctx.strokeStyle = 'rgba(200, 210, 230, 0.25)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.ellipse(0, -17, 35, 9, -0.04, Math.PI * 0.95, Math.PI * 1.9);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 export function hexToRgb(hex: string): string {
   // Accepts "#rgb", "#rrggbb", or "rgba(...)" passthrough as fallback.
   if (hex.startsWith('rgb')) return hex.slice(hex.indexOf('(') + 1, hex.indexOf(')'));

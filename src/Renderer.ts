@@ -2,7 +2,7 @@ import { COLOR, PLAYFIELD_W, PLAYFIELD_H, CHICAGO, BOSS_HP } from './constants';
 import { Dmd } from './Dmd';
 import { Playfield, PLAYFIELD_TOP } from './scene/Playfield';
 import { GameState } from './types';
-import { metalPost, strokeMetalPath, insertArrow } from './Graphics';
+import { metalPost, strokeMetalPath, insertArrow, drawCapone } from './Graphics';
 
 interface Toast {
   text: string;
@@ -123,6 +123,8 @@ export class Renderer {
     // Static under-layer: top apron band, floor + art, lake pool, wireform.
     if (this.staticUnder) ctx.drawImage(this.staticUnder, 0, 0, PLAYFIELD_W, PLAYFIELD_H);
     this.drawChicagoStrip(ctx, pf);
+    // Capone looms over the playfield during the showdown.
+    if (hud.bossActive) drawCapone(ctx, pf.playCenter, 480, 1.9, 0.14);
     // Animated lake shimmer over the static pool.
     this.drawLakeShimmer(ctx, pf);
     // Ramps (raised translucent plates) — drawn before toys so toys layer on top.
@@ -253,7 +255,7 @@ export class Renderer {
       ctx.restore();
     }
 
-    if (state === GameState.TITLE) this.drawTitle(ctx, hud.highScore);
+    if (state === GameState.TITLE) this.drawTitle(ctx, pf, hud.highScore);
     else if (state === GameState.GAME_OVER) this.drawGameOver(ctx, hud);
     else if (state === GameState.READY) this.drawReadyHint(ctx, hud);
     ctx.restore();
@@ -504,6 +506,36 @@ export class Renderer {
     ctx.moveTo(pf.playRight - 16, 252);
     ctx.lineTo(pf.playRight - 152, 186);
     ctx.stroke();
+
+    // WANTED poster pasted on a skyline wall.
+    {
+      ctx.save();
+      ctx.translate(76, 672);
+      ctx.rotate(-0.04);
+      ctx.fillStyle = 'rgba(226, 214, 182, 0.8)';
+      ctx.fillRect(-14, -20, 28, 40);
+      ctx.strokeStyle = 'rgba(60, 45, 25, 0.7)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-14, -20, 28, 40);
+      ctx.fillStyle = 'rgba(70, 20, 20, 0.9)';
+      ctx.font = 'bold 6px "Helvetica Neue", Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('WANTED', 0, -13);
+      drawCapone(ctx, 0, 0, 0.16, 0.9);
+      ctx.fillStyle = 'rgba(70, 20, 20, 0.9)';
+      ctx.fillText('$10,000', 0, 16);
+      ctx.restore();
+    }
+
+    // Glass sheen — two soft diagonal light bands across the playfield.
+    ctx.save();
+    ctx.translate(pf.playCenter, 520);
+    ctx.rotate(-0.42);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.026)';
+    ctx.fillRect(-520, -170, 1040, 84);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.018)';
+    ctx.fillRect(-520, -50, 1040, 30);
+    ctx.restore();
 
     // Brass deco border framing the playfield, with corner fans.
     ctx.strokeStyle = 'rgba(217, 164, 65, 0.20)';
@@ -795,6 +827,26 @@ export class Renderer {
     const d = this.dmd;
     d.clear();
 
+    // Attract mode: cycle marquee messages while nobody's playing.
+    if (hud.state === GameState.TITLE || hud.state === GameState.GAME_OVER) {
+      d.centerText(hud.state === GameState.TITLE ? 'CHICAGO PINBALL' : 'GAME OVER', 1);
+      const msgs =
+        hud.state === GameState.TITLE
+          ? [
+              'THE WINDY CITY',
+              highScoreMsg(hud.highScore),
+              'FREE PLAY',
+              'PRESS ENTER',
+            ].filter((m): m is string => m !== null)
+          : [
+              `FINAL ${Math.max(...hud.playerScores).toLocaleString()}`,
+              hud.matched ? 'MATCH!' : 'PRESS ENTER',
+            ];
+      d.centerText(msgs[Math.floor(performance.now() / 2200) % msgs.length], 10);
+      d.render(ctx, 4, HUD_TOP + 2, PLAYFIELD_W - 8, HUD_BOT - HUD_TOP - 4);
+      return;
+    }
+
     // Top line: player/ball at left, score at right.
     const playerTag = hud.playerScores.length > 1 ? `P${hud.currentPlayer + 1} ` : '';
     const ebTag = hud.extraBalls > 0 ? ` +${hud.extraBalls}EB` : '';
@@ -1085,10 +1137,37 @@ export class Renderer {
   // ── Overlays ──────────────────────────────────────────────────────────
   // (Event text now renders on the DMD — see drawHUDBand.)
 
-  private drawTitle(ctx: CanvasRenderingContext2D, highScore: number) {
+  private drawTitle(ctx: CanvasRenderingContext2D, pf: Playfield, highScore: number) {
     ctx.save();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.62)';
     ctx.fillRect(0, APRON_TOP, PLAYFIELD_W, PLAYFIELD_H - APRON_TOP);
+
+    // Attract-mode lamp chase: three lit halos sweeping the shot inserts.
+    const lamps = [
+      { x: pf.loopArrowXs[0], y: 590 },
+      { x: pf.leftRamp.arrowAt.x, y: pf.leftRamp.arrowAt.y },
+      { x: pf.lakeMichiganScoop.x, y: pf.lakeMichiganScoop.y },
+      { x: 190, y: 226 },
+      { x: pf.bean.cx, y: pf.bean.cy },
+      { x: 290, y: 226 },
+      { x: pf.cityTourScoop.x, y: pf.cityTourScoop.y },
+      { x: pf.rightRamp.arrowAt.x, y: pf.rightRamp.arrowAt.y },
+      { x: pf.loopArrowXs[1], y: 590 },
+    ];
+    const t = Math.floor(performance.now() / 140);
+    for (let k = 0; k < 3; k++) {
+      const lamp = lamps[(t + k) % lamps.length];
+      const g = ctx.createRadialGradient(lamp.x, lamp.y, 2, lamp.x, lamp.y, 26);
+      g.addColorStop(0, `rgba(255, 190, 90, ${0.55 - k * 0.14})`);
+      g.addColorStop(1, 'rgba(255, 190, 90, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(lamp.x, lamp.y, 26, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // The man himself, presiding over the lower playfield.
+    drawCapone(ctx, PLAYFIELD_W / 2, 742, 1.15, 0.95);
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -1270,6 +1349,10 @@ function drawStar6(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: num
   }
   ctx.closePath();
   ctx.fill();
+}
+
+function highScoreMsg(hs: number): string | null {
+  return hs > 0 ? `HIGH SCORE ${hs.toLocaleString()}` : null;
 }
 
 /** Compact score for the DMD multiplayer strip: 12,345 → 12.3K. */
