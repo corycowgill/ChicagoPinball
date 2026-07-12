@@ -472,10 +472,26 @@ export class Playfield {
 
     // Ramp mouths: a ball entering with enough upward speed rides the
     // drawn plate + habitrail all the way to the opposite inlane. `letter`
-    // carries which ramp for shot-specific rules (City Tour stops).
+    // carries which ramp for shot-specific rules (sport modes).
     const rampEntry = (ramp: Ramp, side: 'L' | 'R') => (_s: Matter.Body, o: Matter.Body) => {
       if (o.label !== 'ball') return;
-      if (!ramp.canMake(o)) return;
+      if (!ramp.canMake(o)) {
+        // FLAP REJECT — a soft upward shot doesn't sail through the mouth
+        // into the dead corridor under the plate (where it noodled around
+        // invisibly for seconds and read as "the ramp trapped my ball").
+        // It clunks off the hinged flap and rolls straight back down
+        // toward the flippers, like a real ramp. Descending balls (the
+        // funnel's return flow through the throat) pass untouched.
+        const v = Matter.Body.getVelocity(o);
+        if (v.y < -1) {
+          this.physics.defer(() => {
+            Matter.Body.setVelocity(o, { x: v.x * 0.25, y: Math.max(3.5, -v.y * 0.45) });
+            Matter.Body.setAngularVelocity(o, 0);
+          });
+          ramp.flashNow(); // the flap visibly rattles
+        }
+        return;
+      }
       ramp.flashNow();
       this.events.onScore({ kind: 'ramp', points: POINTS.RAMP, letter: side });
       this.physics.defer(() => this.startTransit(o, ramp.fullPath, 12, ramp.exitVel));
