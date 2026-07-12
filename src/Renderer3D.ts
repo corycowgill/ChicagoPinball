@@ -768,21 +768,24 @@ export class Renderer3D {
     this.spinnerMesh = spinner;
     this.scene.add(spinner);
 
-    // Flippers.
-    for (const side of ['left', 'right'] as const) {
-      const f = side === 'left' ? pf.leftFlipper : pf.rightFlipper;
+    // Flippers — sized off each bat's own dimensions.
+    const flipperDefs = [
+      { f: pf.leftFlipper, key: 'left' as const, color: 0xd62a3e },
+      { f: pf.rightFlipper, key: 'right' as const, color: 0xd62a3e },
+    ];
+    for (const { f, key, color } of flipperDefs) {
       const pivot = f.pivot.pointA;
       const group = new THREE.Group();
       group.position.set(pivot.x, 9, pivot.y);
       const bat = new THREE.Mesh(
-        new THREE.CapsuleGeometry(FLIPPER_HEIGHT / 2, FLIPPER_LEN - FLIPPER_HEIGHT, 6, 12),
-        new THREE.MeshStandardMaterial({ color: 0xd62a3e, roughness: 0.4 }),
+        new THREE.CapsuleGeometry(f.height / 2, f.len - f.height, 6, 12),
+        new THREE.MeshStandardMaterial({ color, roughness: 0.4 }),
       );
       bat.rotation.z = Math.PI / 2;
-      bat.position.x = FLIPPER_LEN / 2 - 4;
+      bat.position.x = f.len / 2 - 4;
       bat.castShadow = true;
       group.add(bat);
-      this.flipperGroups.push({ group, pf: side });
+      this.flipperGroups.push({ group, pf: key });
       this.scene.add(group);
     }
 
@@ -846,9 +849,13 @@ export class Renderer3D {
       }
       // Wireform return: twin chrome rails + crossbar rings.
       const hn = ramp.habitrail.length;
-      const railPts = ramp.habitrail.map((p, i) =>
-        toV3(p, 28 - 26 * Math.pow(i / (hn - 1), 1.6)),
-      );
+      // Height profile holds the rail high until the final dive into the
+      // inlane, so it clears the upper mini flipper (bat top y 20) where
+      // the right-ramp return crosses its channel.
+      const railPts = ramp.habitrail.map((p, i) => {
+        const t = i / (hn - 1);
+        return toV3(p, t < 0.72 ? 28 : 28 - 26 * Math.pow((t - 0.72) / 0.28, 1.15));
+      });
       this.scene.add(this.wireform(railPts));
     }
 
@@ -1658,6 +1665,15 @@ export class Renderer3D {
 
   private updateLamps(pf: Playfield, hud: HudInfo, now: number) {
     const blink = Math.sin(now / 180) > -0.2;
+    // Attract mode: a light wave sweeps every insert across the board.
+    if (hud.state === GameState.TITLE) {
+      for (const l of this.lamps) {
+        const p = l.mesh.position;
+        const on = Math.sin(now / 280 - (p.x + p.z) / 95) > 0.45;
+        l.mat.emissiveIntensity = on ? 2.2 : 0.1;
+      }
+      return;
+    }
     for (const l of this.lamps) {
       let on = false;
       const k = l.kind;
@@ -1673,6 +1689,10 @@ export class Renderer3D {
       else if (k.t === 'mystery') on = hud.mysteryLit;
       else if (k.t === 'loop')
         on = (hud.multiball || hud.bossActive || hud.modeKind === 'loop') && blink;
+      // Combo window: eligible shot arrows strobe fast, chasing the chain.
+      if (!on && hud.comboActive && (k.t === 'sport' || k.t === 'loop')) {
+        on = Math.sin(now / 90) > 0;
+      }
       l.mat.emissiveIntensity = on ? 2.2 : 0.1;
     }
   }

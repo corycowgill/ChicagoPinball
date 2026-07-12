@@ -12,9 +12,24 @@ import {
 
 export type FlipperSide = 'left' | 'right';
 
+export interface FlipperOpts {
+  /** Bat length (default FLIPPER_LEN). */
+  len?: number;
+  /** Bat thickness (default FLIPPER_HEIGHT). Keep it well above the
+   *  per-substep ball motion (BALL_MAX_SPEED / PHYSICS_SUBSTEPS) or fast
+   *  balls can step through the bat. */
+  height?: number;
+  /** RAW angles (already side-adjusted) overriding the standard pair. */
+  restAngle?: number;
+  activeAngle?: number;
+}
+
 export class Flipper {
   readonly body: Matter.Body;
   readonly pivot: Matter.Constraint;
+  /** Bat dimensions — the 3D renderer reads these. */
+  readonly len: number;
+  readonly height: number;
   private active = false;
   private restAngle: number;
   private activeAngle: number;
@@ -26,24 +41,29 @@ export class Flipper {
   private readonly returnStep = FLIPPER_RETURN_VEL;
 
   /** pivotX/pivotY is the world-space hinge point. */
-  constructor(side: FlipperSide, pivotX: number, pivotY: number) {
+  constructor(side: FlipperSide, pivotX: number, pivotY: number, opts: FlipperOpts = {}) {
     this.side = side;
     this.pivotX = pivotX;
     this.pivotY = pivotY;
-    this.restAngle = side === 'left' ? FLIPPER_REST_ANGLE : Math.PI - FLIPPER_REST_ANGLE;
-    this.activeAngle = side === 'left' ? FLIPPER_ACTIVE_ANGLE : Math.PI - FLIPPER_ACTIVE_ANGLE;
+    this.len = opts.len ?? FLIPPER_LEN;
+    this.height = opts.height ?? FLIPPER_HEIGHT;
+    this.restAngle =
+      opts.restAngle ?? (side === 'left' ? FLIPPER_REST_ANGLE : Math.PI - FLIPPER_REST_ANGLE);
+    this.activeAngle =
+      opts.activeAngle ??
+      (side === 'left' ? FLIPPER_ACTIVE_ANGLE : Math.PI - FLIPPER_ACTIVE_ANGLE);
 
     // Place body so its LEFT end (local x = -half) sits on the pivot when at restAngle.
-    const half = FLIPPER_LEN / 2;
+    const half = this.len / 2;
     const px = pivotX + Math.cos(this.restAngle) * half;
     const py = pivotY + Math.sin(this.restAngle) * half;
 
-    this.body = Matter.Bodies.rectangle(px, py, FLIPPER_LEN, FLIPPER_HEIGHT, {
+    this.body = Matter.Bodies.rectangle(px, py, this.len, this.height, {
       density: 0.12,
       frictionAir: 0.02,
       friction: 0.1,
       restitution: 0.2,
-      chamfer: { radius: FLIPPER_HEIGHT / 2 },
+      chamfer: { radius: this.height / 2 },
       label: side === 'left' ? 'flipper-left' : 'flipper-right',
     });
     // Gravity does act on the bat (matter-js has no per-body gravity
@@ -130,7 +150,7 @@ export class Flipper {
   enforce() {
     const target = this.active ? this.activeAngle : this.restAngle;
     const diff = target - this.body.angle;
-    const half = FLIPPER_LEN / 2;
+    const half = this.len / 2;
     // Snap-to-target window: only absorbs the tiny residue left by ball
     // impacts nudging the held bat. Kept SMALL (tip motion 0.03 × 108 ≈
     // 3 px) because the snap is a teleport that bypasses collision — a
@@ -163,8 +183,8 @@ export class Flipper {
     const a = this.body.angle;
     const cx = this.body.position.x;
     const cy = this.body.position.y;
-    const half = FLIPPER_LEN / 2;
-    const h = FLIPPER_HEIGHT;
+    const half = this.len / 2;
+    const h = this.height;
 
     // Drop shadow under the flipper bat.
     ctx.save();
@@ -191,10 +211,10 @@ export class Flipper {
 
     // Glossy highlight stripe along the top edge of the bat.
     ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-    ctx.fillRect(-half + 8, -h / 2 + 2, FLIPPER_LEN - 18, 1.6);
+    ctx.fillRect(-half + 8, -h / 2 + 2, this.len - 18, 1.6);
     // Brass pinstripe — matches the deco trim across the board.
     ctx.fillStyle = 'rgba(217, 164, 65, 0.6)';
-    ctx.fillRect(-half + 8, -h / 2 + 5, FLIPPER_LEN - 22, 1);
+    ctx.fillRect(-half + 8, -h / 2 + 5, this.len - 22, 1);
 
     // Black rubber strip along the leading (striking) face.
     ctx.fillStyle = COLOR.FLIPPER_RUBBER;

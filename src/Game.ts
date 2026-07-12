@@ -730,6 +730,7 @@ export class Game {
       const released = this.playfield.releaseLocks();
       this.renderer.pushToast(`LAKE SHORE MULTIBALL × ${released}`, COLOR.NEON_AMBER, 1800);
       this.renderer.triggerJackpotFlash();
+      this.renderer.kick(5); // the release burst rocks the cabinet
       this.sound.multiball();
       this.sound.speak('Lake Shore multiball!', true);
       this.sound.startMusic('action');
@@ -1045,6 +1046,7 @@ export class Game {
       mysteryLit: this.mysteryLit,
       expressLit: this.expressLit,
       hurryUpValue: Math.round(this.hurryUpValue),
+      comboActive: this.timeMs - this.lastComboAt < COMBO_WINDOW_MS,
       bonusX: this.bonusX,
       ballSaveMs: this.ballSaveMs,
       highScore: this.highScore,
