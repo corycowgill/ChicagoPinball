@@ -283,7 +283,9 @@ export class Playfield {
         { x: 46, y: 618 },
         { x: 63, y: 640 },
       ],
-      exitVel: { x: -0.4, y: 6 },
+      // y 8 (was 6): enough punch to push through the spinner blade in the
+      // left inlane instead of crawling to a near-stall on it.
+      exitVel: { x: -0.4, y: 8 },
       color: COLOR.INSERT_CYAN,
       arrowAngle: -Math.PI / 2 + 0.45,
       label: 'right-ramp',
@@ -297,7 +299,11 @@ export class Playfield {
     physics.add(this.lakeMichiganScoop.sensor);
 
     // ── CITY TOUR SCOOP — mode-start saucer up the right side. ──
-    this.cityTourScoop = new Scoop(this.playRight - 80, 545, -Math.PI / 2 - 0.35, 15);
+    // Kick nearly vertical at moderate speed: the old (-0.35, 15) eject
+    // ricocheted off the CAGO bank's backside and fed the RIGHT OUTLANE —
+    // draining as a reward for making the mode-start shot. (-0.2, 13)
+    // lands the ball in the bumper nest instead.
+    this.cityTourScoop = new Scoop(this.playRight - 80, 545, -Math.PI / 2 - 0.2, 13);
     physics.add(this.cityTourScoop.sensor);
 
     // ── CAPTIVE BALL — vertical lane on the right; a left-flipper shot up
@@ -498,6 +504,14 @@ export class Playfield {
     };
     physics.on('left-ramp-entry', rampEntry(this.leftRamp, 'L'));
     physics.on('right-ramp-entry', rampEntry(this.rightRamp, 'R'));
+
+    // Spinner rip: the blade is a sensor — the ball passes at full speed
+    // and the blade spins up proportionally (revolutions score in tick()).
+    physics.on('spinner', (_s, o) => {
+      if (o.label !== 'ball') return;
+      const v = Matter.Body.getVelocity(o);
+      this.spinner.rip(Math.hypot(v.x, v.y));
+    });
 
     physics.on('captive-ball', (_s, o) => {
       if (o.label !== 'ball') return;

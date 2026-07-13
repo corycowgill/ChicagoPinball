@@ -2,8 +2,12 @@ import Matter from 'matter-js';
 import { COLOR } from '../constants';
 import { metalPost, softShadow } from '../Graphics';
 
-/** A free-spinning blade pinned at its centre. Each ball pass through the
- *  lane sets it spinning; we count revolutions for scoring. */
+/** A free-spinning blade pinned at its centre. The blade is a SENSOR:
+ *  a real spinner rotates on a horizontal axle and the ball passes under
+ *  it at full speed (which is also how the 3D blade reads). Modelling it
+ *  as a solid in-plane bar made ramp returns stall against it — a ball
+ *  centred near the pivot has almost no lever arm to shove it aside.
+ *  Each pass calls rip() instead, and revolutions score as before. */
 export class Spinner {
   readonly body: Matter.Body;
   readonly pivot: Matter.Constraint;
@@ -16,6 +20,7 @@ export class Spinner {
       density: 0.001,
       frictionAir: 0.04,
       restitution: 0.2,
+      isSensor: true,
       label: 'spinner',
     });
     this.pivot = Matter.Constraint.create({
@@ -35,6 +40,14 @@ export class Spinner {
       length: 0,
     });
     this.prevAngle = this.body.angle;
+  }
+
+  /** A ball just passed through — rip the blade proportional to speed. */
+  rip(ballSpeed: number) {
+    const w = Math.min(1.1, 0.06 * ballSpeed);
+    // Keep the current spin direction if it's already ripping.
+    const sign = this.body.angularVelocity < -0.01 ? -1 : 1;
+    Matter.Body.setAngularVelocity(this.body, sign * Math.max(Math.abs(this.body.angularVelocity), w));
   }
 
   collectRevolutions(): number {
