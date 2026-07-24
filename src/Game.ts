@@ -16,6 +16,11 @@ import {
   COMBO_WINDOW_MS,
   BOSS_HP,
   BOSS_MS,
+  MB_JACKPOT_BASE,
+  MB_JACKPOT_STEP,
+  MB_JACKPOTS_FOR_SUPER,
+  MB_SUPER_MULT,
+  SUPER_SKILL_MS,
   SPORT_MODE_MS,
   CROSSTOWN_MS,
   TRAIN_PERIOD_MS,
@@ -162,6 +167,12 @@ export class Game {
   private crosstownLeft: number[] = [];
   private crosstownMsLeft = 0;
   private multiballActive = false;
+  // Lake Shore Multiball jackpot cycle.
+  private mbJackpotValue = MB_JACKPOT_BASE;
+  private mbJackpots = 0;
+  private mbSuperLit = false;
+  // Super skill shot: Bean pays big for a beat after the skill shot.
+  private superSkillMs = 0;
   // City Lights: complete both standup team pairs in one ball.
   private pairCubsBears = false;
   private pairBullsSox = false;
@@ -181,6 +192,11 @@ export class Game {
   private elFare = 0;
   // Hurry-up finale: >0 while the last shot of a sport mode is pending.
   private hurryUpValue = 0;
+
+  // End-of-ball bonus ceremony (DMD count-up while BALL_DRAINED).
+  private ceremonyTotal = 0;
+  private ceremonyDuration = 0;
+  private ceremonyTickAccum = 0;
 
   // Per-ball progression
   private ballSaveMs = 0;
@@ -341,11 +357,45 @@ export class Game {
       (s) => s.kind === e.kind && (!s.letter || s.letter === e.letter),
     );
     if (sportIdx >= 0) pts += this.handleSportShot(sportIdx, e.kind);
-    // Multiball jackpot: ramp / scoop hits during multiball pay big.
+    // Lake Shore Multiball: escalating jackpots at the ramps / orbits /
+    // scoop; every few light the SUPER at the Bean.
     if (this.multiballActive && this.isJackpotShot(e.kind)) {
-      pts += POINTS.MULTIBALL_JACKPOT;
-      this.renderer.pushToast('JACKPOT +' + POINTS.MULTIBALL_JACKPOT.toLocaleString(), COLOR.NEON_AMBER, 900);
+      pts += this.mbJackpotValue;
+      this.mbJackpots++;
+      this.renderer.pushToast(
+        `JACKPOT +${this.mbJackpotValue.toLocaleString()}`,
+        COLOR.NEON_AMBER,
+        900,
+      );
       this.sound.jackpot();
+      if (!this.mbSuperLit && this.mbJackpots >= MB_JACKPOTS_FOR_SUPER) {
+        this.mbSuperLit = true;
+        this.renderer.pushToast('SUPER JACKPOT AT THE BEAN', COLOR.INSERT_RED, 1600);
+        this.sound.lock();
+        this.sound.speak('Super jackpot at the Bean!', true);
+      }
+    }
+    if (this.multiballActive && this.mbSuperLit && e.kind === 'bean') {
+      const superV = this.mbJackpotValue * MB_SUPER_MULT;
+      pts += superV;
+      this.mbSuperLit = false;
+      this.mbJackpots = 0;
+      this.mbJackpotValue += MB_JACKPOT_STEP;
+      this.renderer.pushToast(`SUPER JACKPOT +${superV.toLocaleString()}`, COLOR.NEON_AMBER, 1800);
+      this.renderer.triggerJackpotFlash();
+      this.renderer.kick(5);
+      this.sound.jackpot();
+      this.sound.crowd(1200, 0.22);
+      this.sound.speak('Super jackpot!', true);
+    }
+    // Super skill shot: the Bean pays big right after the skill shot.
+    if (this.superSkillMs > 0 && e.kind === 'bean') {
+      this.superSkillMs = 0;
+      pts += POINTS.SUPER_SKILL;
+      this.renderer.pushToast(`SUPER SKILL +${POINTS.SUPER_SKILL.toLocaleString()}`, COLOR.NEON_AMBER, 1500);
+      this.renderer.triggerJackpotFlash();
+      this.sound.jackpot();
+      this.sound.speak('Super skill shot!', true);
     }
 
     // Boss battle: every hit chips at Capone.
@@ -371,6 +421,8 @@ export class Game {
         break;
       case 'skill-shot':
         this.renderer.pushToast(`SKILL SHOT +${e.points.toLocaleString()}`, COLOR.NEON_AMBER, 1200);
+        this.renderer.pushToast('SUPER SKILL AT THE BEAN', COLOR.TEXT_DIM, 1200);
+        this.superSkillMs = SUPER_SKILL_MS;
         this.sound.rollover();
         break;
       case 'lane':
@@ -755,6 +807,9 @@ export class Game {
     if (this.playfield.bean.locked >= 3) {
       // Multiball start — the locked balls fan out from the Bean.
       this.multiballActive = true;
+      this.mbJackpotValue = MB_JACKPOT_BASE;
+      this.mbJackpots = 0;
+      this.mbSuperLit = false;
       const released = this.playfield.releaseLocks();
       this.renderer.pushToast(`LAKE SHORE MULTIBALL × ${released}`, COLOR.NEON_AMBER, 1800);
       this.renderer.triggerJackpotFlash();
@@ -812,14 +867,17 @@ export class Game {
     this.sound.drain();
     this.renderer.kick(4);
     const bonus = this.bonusUnits * BONUS_UNIT * this.bonusX;
+    this.ceremonyTotal = 0;
     if (this.tilted) {
       // Tilting forfeits the bonus — the classic price.
       this.renderer.pushToast('BONUS LOST — TILT', COLOR.INSERT_RED, 1500);
     } else if (bonus > 0) {
+      // Score lands now; the DMD counts it up as a ceremony while the
+      // machine gets the next ball ready (tick sounds in update()).
       this.score += bonus;
-      const xText = this.bonusX > 1 ? `  ×${this.bonusX}` : '';
-      this.renderer.pushToast(`BONUS ${bonus.toLocaleString()}${xText}`, COLOR.NEON_AMBER, 1600);
-      this.sound.bonusCount();
+      this.ceremonyTotal = bonus;
+      this.ceremonyDuration = 2200;
+      this.ceremonyTickAccum = 0;
     }
     // Extra ball buys the same player another go at the same ball number.
     if (this.cur.extraBalls > 0) {
@@ -829,7 +887,7 @@ export class Game {
       this.sound.speak('Shoot again!');
     }
     this.state = GameState.BALL_DRAINED;
-    this.respawnTimer = bonus > 0 ? 1700 : 900;
+    this.respawnTimer = bonus > 0 && !this.tilted ? 2600 : 900;
   }
 
   update(dtMs: number) {
@@ -963,6 +1021,9 @@ export class Game {
     if (this.state === GameState.PLAYING && this.ballSaveMs > 0) {
       this.ballSaveMs = Math.max(0, this.ballSaveMs - dtMs);
     }
+    if (this.state === GameState.PLAYING && this.superSkillMs > 0) {
+      this.superSkillMs = Math.max(0, this.superSkillMs - dtMs);
+    }
     if (this.bossActive && this.state === GameState.PLAYING) {
       this.bossMsLeft -= dtMs;
       if (this.bossMsLeft <= 0) this.bossFail();
@@ -971,6 +1032,17 @@ export class Game {
     if (this.tiltHeat > 0) this.tiltHeat = Math.max(0, this.tiltHeat - (TILT_DECAY_PER_S * dtMs) / 1000);
 
     if (this.state === GameState.BALL_DRAINED) {
+      // Bonus count-up ticks while the ceremony runs.
+      if (this.ceremonyTotal > 0) {
+        const progress = 1 - Math.max(0, this.respawnTimer - 400) / this.ceremonyDuration;
+        if (progress < 1) {
+          this.ceremonyTickAccum += dtMs;
+          while (this.ceremonyTickAccum > 140) {
+            this.ceremonyTickAccum -= 140;
+            this.sound.bonusCount();
+          }
+        }
+      }
       this.respawnTimer -= dtMs;
       if (this.respawnTimer <= 0) {
         if (this.shootAgain) {
@@ -1114,6 +1186,14 @@ export class Game {
       comboActive: this.timeMs - this.lastComboAt < COMBO_WINDOW_MS,
       bonusX: this.bonusX,
       ballSaveMs: this.ballSaveMs,
+      superSkillMs: this.superSkillMs,
+      mbSuperLit: this.mbSuperLit,
+      mbJackpotValue: this.mbJackpotValue,
+      ceremonyTotal: this.state === GameState.BALL_DRAINED ? this.ceremonyTotal : 0,
+      ceremonyProgress:
+        this.state === GameState.BALL_DRAINED && this.ceremonyTotal > 0
+          ? Math.min(1, 1 - Math.max(0, this.respawnTimer - 400) / this.ceremonyDuration)
+          : 0,
       highScore: this.highScore,
       highScoreInitials: this.highScoreInitials,
       enteringInitials: this.enteringInitials,

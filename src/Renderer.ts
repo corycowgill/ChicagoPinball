@@ -65,6 +65,14 @@ export interface HudInfo {
   comboActive: boolean;
   bonusX: number;
   ballSaveMs: number;
+  /** Super-skill window: the Bean pays big while > 0. */
+  superSkillMs: number;
+  /** Lake Shore Multiball: SUPER lit at the Bean + current jackpot value. */
+  mbSuperLit: boolean;
+  mbJackpotValue: number;
+  /** End-of-ball bonus ceremony (BALL_DRAINED): total + 0..1 count-up. */
+  ceremonyTotal: number;
+  ceremonyProgress: number;
   highScore: number;
   /** Initials attached to the stored high score ('' if none yet). */
   highScoreInitials: string;
