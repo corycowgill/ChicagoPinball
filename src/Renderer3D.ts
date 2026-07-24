@@ -88,6 +88,7 @@ export class Renderer3D {
       | { t: 'mystery' }
       | { t: 'express' }
       | { t: 'lock'; i: number }
+      | { t: 'save' }
       | { t: 'loop'; i: number };
   }[] = [];
   private floodlights: THREE.SpotLight[] = [];
@@ -186,6 +187,14 @@ export class Renderer3D {
   kick(amp: number) {
     this.shakeAmp = Math.max(this.shakeAmp, amp);
     this.shakeMs = 90;
+    // Haptics on touch devices — pulse length scales with the hit.
+    if (this.quality === 'mobile' && typeof navigator !== 'undefined' && navigator.vibrate) {
+      try {
+        navigator.vibrate(Math.min(60, Math.round(amp * 12)));
+      } catch {
+        /* vibration blocked — fine */
+      }
+    }
   }
 
   sportEvent(sportIdx: number, type: 'start' | 'hit' | 'complete') {
@@ -1342,6 +1351,8 @@ export class Renderer3D {
       const [x, z] = sportInsertPos[i];
       lamp(x, z, 7, sportColor(s.id), { t: 'sport', i });
     });
+    // Ball-save insert between the flippers — blinks faster as it expires.
+    lamp(pf.playCenter, 812, 8, '#5cff9a', { t: 'save' });
     lamp(pf.kickbackPos.x, pf.kickbackPos.y - 8, 6, '#5cff9a', { t: 'kickback' });
     lamp(pf.expressPos.x, pf.expressPos.y - 8, 6, '#3ff0ff', { t: 'express' });
     // Lock inserts in a small arc below the Bean — flat, so live balls can
@@ -1755,6 +1766,11 @@ export class Renderer3D {
         const active =
           hud.activeSport === k.i || (hud.crosstownActive && hud.crosstownLeft.includes(k.i));
         on = hud.sportsDone[k.i] || (active && blink);
+      } else if (k.t === 'save') {
+        // Steady early, urgent strobe in the final seconds.
+        on =
+          hud.ballSaveMs > 0 &&
+          (hud.ballSaveMs > 3000 ? blink : Math.sin(now / 70) > 0);
       } else if (k.t === 'kickback') on = hud.kickbackLit && blink;
       else if (k.t === 'express') on = hud.expressLit && blink;
       else if (k.t === 'lock') on = k.i < pf.bean.locked;
