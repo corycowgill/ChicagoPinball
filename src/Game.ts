@@ -49,6 +49,8 @@ interface PlayerState {
   /** One flag per entry in SPORTS — the Crosstown ladder. */
   sportsDone: boolean[];
   crosstownDone: boolean;
+  /** Bonus X carried into this player's next ball (0 = none). */
+  heldBonusX: number;
 }
 
 function newPlayer(): PlayerState {
@@ -61,6 +63,7 @@ function newPlayer(): PlayerState {
     replayAwarded: false,
     sportsDone: SPORTS.map(() => false),
     crosstownDone: false,
+    heldBonusX: 0,
   };
 }
 
@@ -325,6 +328,17 @@ export class Game {
 
   private advanceBonusX() {
     if (this.state !== GameState.PLAYING) return;
+    if (this.bonusX >= MAX_BONUS_X) {
+      // Already maxed: completing the lanes again HOLDS the multiplier
+      // for this player's next ball — lane-change stays worth playing.
+      if (this.cur.heldBonusX < MAX_BONUS_X) {
+        this.cur.heldBonusX = this.bonusX;
+        this.renderer.pushToast(`BONUS ×${this.bonusX} HELD`, COLOR.NEON_AMBER, 1600);
+        this.sound.lock();
+        this.sound.speak('Bonus held!');
+      }
+      return;
+    }
     this.bonusX = Math.min(MAX_BONUS_X, this.bonusX + 1);
     this.renderer.pushToast(`BONUS ×${this.bonusX}`, COLOR.NEON_GREEN, 1200);
     this.sound.combo(this.bonusX);
@@ -1102,7 +1116,12 @@ export class Game {
   private startNextBall() {
     this.playfield.resetBall();
     this.bonusUnits = 0;
-    this.bonusX = 1;
+    // A held multiplier carries into this player's ball, once.
+    this.bonusX = this.cur.heldBonusX > 0 ? this.cur.heldBonusX : 1;
+    if (this.cur.heldBonusX > 0) {
+      this.renderer.pushToast(`BONUS ×${this.bonusX} CARRIED`, COLOR.NEON_AMBER, 1500);
+      this.cur.heldBonusX = 0;
+    }
     this.comboCount = 0;
     this.lastComboAt = -1e9;
     this.activeSport = -1;
