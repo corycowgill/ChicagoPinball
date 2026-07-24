@@ -96,6 +96,18 @@ export const COMBO_WINDOW_MS = 4000;
 export const BOSS_HP = 60;
 export const BOSS_MS = 45000;
 
+// Lake Shore Multiball economy: jackpots at the ramps / orbits / scoop
+// escalate; every N jackpots light the SUPER at the Bean, which pays a
+// multiple of the current value and raises it for the next cycle.
+export const MB_JACKPOT_BASE = 15000;
+export const MB_JACKPOT_STEP = 5000;
+export const MB_JACKPOTS_FOR_SUPER = 3;
+export const MB_SUPER_MULT = 3;
+
+// Super skill shot: after the skill-shot lanes, the Bean pays big for a
+// few seconds — reward for a full-plunge follow-through.
+export const SUPER_SKILL_MS = 4000;
+
 // Replay: first time a player crosses this score they're awarded an extra
 // ball, with the knocker. Once per player per game.
 export const REPLAY_SCORE = 500000;
@@ -116,7 +128,7 @@ export const POINTS = {
   CAPTIVE_BALL: 750,
   LOCK: 5000,
   SUPER_JACKPOT: 50000,
-  MULTIBALL_JACKPOT: 7500,
+  SUPER_SKILL: 40000,
   SKILL_SHOT_SIDE: 10000,
   SKILL_SHOT_CENTER: 25000,
   LANE: 2000,

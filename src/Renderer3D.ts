@@ -76,6 +76,7 @@ export class Renderer3D {
   private bumperCapMats: THREE.MeshStandardMaterial[] = [];
   private slingMats: THREE.MeshStandardMaterial[] = [];
   private beanMesh: THREE.Mesh | null = null;
+  private beanMat: THREE.MeshStandardMaterial | null = null;
   private lamps: {
     mesh: THREE.Mesh;
     mat: THREE.MeshStandardMaterial;
@@ -679,10 +680,14 @@ export class Renderer3D {
 
     // The Bean — squashed chrome sphere (Cloud Gate); doubles as the
     // Lake Shore multiball lock.
-    const bean = new THREE.Mesh(
-      new THREE.SphereGeometry(pf.bean.radius + 6, 48, 32),
-      new THREE.MeshStandardMaterial({ color: 0xf2f5fa, metalness: 1, roughness: 0.06 }),
-    );
+    this.beanMat = new THREE.MeshStandardMaterial({
+      color: 0xf2f5fa,
+      metalness: 1,
+      roughness: 0.06,
+      emissive: new THREE.Color('#ffb547'),
+      emissiveIntensity: 0,
+    });
+    const bean = new THREE.Mesh(new THREE.SphereGeometry(pf.bean.radius + 6, 48, 32), this.beanMat);
     bean.scale.set(1.25, 0.8, 1);
     bean.position.set(pf.bean.cx, 20, pf.bean.cy);
     bean.castShadow = true;
@@ -1571,6 +1576,11 @@ export class Renderer3D {
       const s = 1 + pf.bean.flashLevel * 0.08;
       this.beanMesh.scale.set(1.25 * s, 0.8 * s, s);
     }
+    // The Bean pulses amber whenever it's the hot target.
+    if (this.beanMat) {
+      const hot = hud.mbSuperLit || hud.superSkillMs > 0;
+      this.beanMat.emissiveIntensity = hot ? 0.25 + 0.35 * Math.abs(Math.sin(now / 130)) : 0;
+    }
 
     this.animateTrain(hud);
     this.animateStadium(hud, now);
@@ -1794,6 +1804,12 @@ export class Renderer3D {
     const latest = this.toasts[this.toasts.length - 1];
     const blink = Math.floor(performance.now() / 250) % 2 === 0;
     const secs = (ms: number) => `${Math.max(0, Math.ceil(ms / 1000))}S`;
+    // End-of-ball bonus ceremony: the classic count-up owns the display.
+    if (hud.ceremonyTotal > 0) {
+      const shown = Math.round((hud.ceremonyTotal * hud.ceremonyProgress) / 100) * 100;
+      d.centerText(`BONUS ${shown.toLocaleString()}`, 10);
+      return;
+    }
     if (latest && latest.total - latest.ttl < 2400) {
       if (latest.total - latest.ttl < 350 || blink || latest.total - latest.ttl > 900) {
         d.centerText(latest.text, 10);
@@ -1811,7 +1827,8 @@ export class Renderer3D {
       const s = SPORTS[hud.activeSport];
       d.centerText(`${s.sport} ${hud.modeHits}/${hud.modeGoal} ${secs(hud.modeMsLeft)}`, 10);
     } else if (hud.multiball) {
-      if (blink) d.centerText('LAKE SHORE MULTIBALL', 10);
+      if (hud.mbSuperLit && blink) d.centerText('SUPER AT THE BEAN', 10);
+      else if (blink) d.centerText(`JACKPOT ${Math.round(hud.mbJackpotValue / 1000)}K`, 10);
     } else if (hud.tilted) {
       if (blink) d.centerText('TILT', 10);
     } else if (hud.tiltHeat >= 2) {
