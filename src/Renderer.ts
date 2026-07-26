@@ -59,6 +59,16 @@ export interface HudInfo {
   mysteryLit: boolean;
   /** EL EXPRESS right-outlane rescue is armed. */
   expressLit: boolean;
+  /** Instant-info panel open (both flippers held). */
+  statusOpen: boolean;
+  /** Bonus X waiting to carry into this player's next ball. */
+  heldBonusX: number;
+  /** Pop-bumper fare progress toward lighting the EL EXPRESS. */
+  elFare: number;
+  elFareNeeded: number;
+  /** How many times this player has spelled CHICAGO. */
+  chicagoCompletions: number;
+  crosstownDone: boolean;
   /** Countdown value of the pending sport-mode finale shot (0 = none). */
   hurryUpValue: number;
   /** Inside the combo window — the eligible shot arrows strobe. */

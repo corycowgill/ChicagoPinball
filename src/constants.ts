@@ -104,6 +104,13 @@ export const MB_JACKPOT_STEP = 5000;
 export const MB_JACKPOTS_FOR_SUPER = 3;
 export const MB_SUPER_MULT = 3;
 
+// Each CHICAGO completion after the first pays this much MORE than the
+// last, so re-spelling the bank stays worth the shots.
+export const CHICAGO_SUPER_STEP = 25000;
+
+// Status report: hold BOTH flippers this long to see full progress.
+export const STATUS_HOLD_MS = 1200;
+
 // Super skill shot: after the skill-shot lanes, the Bean pays big for a
 // few seconds — reward for a full-plunge follow-through.
 export const SUPER_SKILL_MS = 4000;
