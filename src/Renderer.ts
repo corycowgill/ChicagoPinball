@@ -85,6 +85,9 @@ export interface HudInfo {
   ballSaveMs: number;
   /** Super-skill window: the Bean pays big while > 0. */
   superSkillMs: number;
+  /** Ms left on each ramp's inlane-lit double value. */
+  rampBoostL: number;
+  rampBoostR: number;
   /** Lake Shore Multiball: SUPER lit at the Bean + current jackpot value. */
   mbSuperLit: boolean;
   mbJackpotValue: number;

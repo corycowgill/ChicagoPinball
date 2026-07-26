@@ -90,6 +90,8 @@ export class Renderer3D {
       | { t: 'express' }
       | { t: 'lock'; i: number }
       | { t: 'save' }
+      | { t: 'inlane'; side: 'L' | 'R' }
+      | { t: 'rampboost'; side: 'L' | 'R' }
       | { t: 'loop'; i: number };
   }[] = [];
   private floodlights: THREE.SpotLight[] = [];
@@ -1502,6 +1504,11 @@ export class Renderer3D {
     });
     // Ball-save insert between the flippers — blinks faster as it expires.
     lamp(pf.playCenter, 812, 8, '#5cff9a', { t: 'save' });
+    // Inlane rollover inserts + the ramp-lit arrows they feed.
+    lamp(63, 712, 7, '#5cff9a', { t: 'inlane', side: 'L' });
+    lamp(pf.playRight - 63, 712, 7, '#5cff9a', { t: 'inlane', side: 'R' });
+    lamp(155, 616, 7, '#5cff9a', { t: 'rampboost', side: 'L' });
+    lamp(325, 616, 7, '#5cff9a', { t: 'rampboost', side: 'R' });
     lamp(pf.kickbackPos.x, pf.kickbackPos.y - 8, 6, '#5cff9a', { t: 'kickback' });
     lamp(pf.expressPos.x, pf.expressPos.y - 8, 6, '#3ff0ff', { t: 'express' });
     // Lock inserts in a small arc below the Bean — flat, so live balls can
@@ -1942,6 +1949,13 @@ export class Renderer3D {
         on =
           hud.ballSaveMs > 0 &&
           (hud.ballSaveMs > 3000 ? blink : Math.sin(now / 70) > 0);
+      } else if (k.t === 'inlane') {
+        // Lit while the inlane's ramp reward is still live.
+        on = (k.side === 'L' ? hud.rampBoostR : hud.rampBoostL) > 0;
+      } else if (k.t === 'rampboost') {
+        const ms = k.side === 'L' ? hud.rampBoostL : hud.rampBoostR;
+        // Urgent strobe in the final second before the double expires.
+        on = ms > 0 && (ms > 1000 ? Math.sin(now / 100) > -0.3 : Math.sin(now / 55) > 0);
       } else if (k.t === 'kickback') on = hud.kickbackLit && blink;
       else if (k.t === 'express') on = hud.expressLit && blink;
       else if (k.t === 'lock') on = k.i < pf.bean.locked;

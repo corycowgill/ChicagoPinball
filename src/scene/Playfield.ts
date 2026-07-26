@@ -120,6 +120,8 @@ export class Playfield {
   private lastLeftLoopAt = -1000;
   private lastRightLoopAt = -1000;
   private lastKickbackAt = -1000;
+  private lastInlaneL = -1000;
+  private lastInlaneR = -1000;
 
   /** Kickback kicker position (left outlane, drawn by the Renderer). */
   readonly kickbackPos = { x: 21, y: 884 };
@@ -325,6 +327,22 @@ export class Playfield {
       label: 'left-outlane',
     });
     physics.add(kickbackSensor);
+
+    // ── INLANE ROLLOVERS — the return path was completely dead: no
+    //    switch, no score, no feedback on the most common thing a ball
+    //    does. Each one lights the ramp its flipper feeds. ──
+    for (const [ix, label] of [
+      [63, 'inlane-left'],
+      [this.playRight - 63, 'inlane-right'],
+    ] as const) {
+      physics.add(
+        Matter.Bodies.rectangle(ix, 712, 34, 12, {
+          isStatic: true,
+          isSensor: true,
+          label,
+        }),
+      );
+    }
 
     // ── EL EXPRESS sensor — right outlane, mirror of the kickback. ──
     const expressSensor = Matter.Bodies.rectangle(this.expressPos.x, this.expressPos.y, 38, 10, {
@@ -572,6 +590,18 @@ export class Playfield {
       if (this.clockMs - this.lastKickbackAt < 800) return;
       this.events.onLeftOutlane(o);
     });
+
+    // Inlane returns — rate-limited so a resting ball can't farm them.
+    const inlane = (side: 'L' | 'R') => (_s: Matter.Body, o: Matter.Body) => {
+      if (o.label !== 'ball') return;
+      const last = side === 'L' ? this.lastInlaneL : this.lastInlaneR;
+      if (this.clockMs - last < 900) return;
+      if (side === 'L') this.lastInlaneL = this.clockMs;
+      else this.lastInlaneR = this.clockMs;
+      this.events.onScore({ kind: 'inlane', points: POINTS.INLANE, letter: side });
+    };
+    physics.on('inlane-left', inlane('L'));
+    physics.on('inlane-right', inlane('R'));
 
     // Right outlane — EL EXPRESS territory.
     physics.on('right-outlane', (_s, o) => {

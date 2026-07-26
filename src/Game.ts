@@ -14,6 +14,8 @@ import {
   BONUS_UNIT,
   MAX_BONUS_X,
   COMBO_WINDOW_MS,
+  RAMP_BOOST_MS,
+  RAMP_BOOST_MULT,
   COMBO_MASTER_CHAIN,
   COMBO_MASTER_AWARD,
   BOSS_HP,
@@ -102,6 +104,7 @@ const BONUS_UNITS: Partial<Record<ScoreEvent['kind'], number>> = {
   lock: 5,
   lane: 1,
   'skill-shot': 2,
+  inlane: 1,
 };
 
 /** Damage each scoring event deals to the rival during the SHOWDOWN. */
@@ -205,6 +208,9 @@ export class Game {
   private elFare = 0;
   // Hurry-up finale: >0 while the last shot of a sport mode is pending.
   private hurryUpValue = 0;
+  // Inlane → lit ramp: ms left on each ramp's doubled value.
+  private rampBoostL = 0;
+  private rampBoostR = 0;
 
   // Status report: both flippers held opens the progress panel.
   private statusHoldMs = 0;
@@ -420,6 +426,19 @@ export class Game {
       this.lastComboAt = this.timeMs;
     }
 
+    // A lit ramp (fed by the opposite inlane) pays double.
+    if (e.kind === 'ramp') {
+      const boost = e.letter === 'L' ? this.rampBoostL : this.rampBoostR;
+      if (boost > 0) {
+        if (e.letter === 'L') this.rampBoostL = 0;
+        else this.rampBoostR = 0;
+        const extra = e.points * (RAMP_BOOST_MULT - 1);
+        pts += extra;
+        this.renderer.pushToast(`LIT RAMP ×${RAMP_BOOST_MULT}`, COLOR.NEON_GREEN, 1100);
+        this.sound.combo(3);
+      }
+    }
+
     // Sports: this shot may advance the Crosstown Championship, advance the
     // running sport mode, or start a fresh one.
     const sportIdx = SPORTS.findIndex(
@@ -510,6 +529,20 @@ export class Game {
       case 'lane':
         this.sound.rollover();
         break;
+      case 'inlane': {
+        // The return feeds a flipper — light the ramp THAT flipper shoots:
+        // left inlane → left flipper → right ramp, and vice versa.
+        this.sound.rollover();
+        const ramp = e.letter === 'L' ? 'R' : 'L';
+        if (ramp === 'L') this.rampBoostL = RAMP_BOOST_MS;
+        else this.rampBoostR = RAMP_BOOST_MS;
+        this.renderer.pushToast(
+          `${ramp === 'L' ? 'LEFT' : 'RIGHT'} RAMP LIT ×${RAMP_BOOST_MULT}`,
+          COLOR.NEON_GREEN,
+          1100,
+        );
+        break;
+      }
       case 'ramp':
         this.renderer.pushToast('RAMP +' + e.points.toLocaleString(), COLOR.INSERT_BLUE, 700);
         this.sound.ramp();
@@ -1147,6 +1180,10 @@ export class Game {
     if (this.state === GameState.PLAYING && this.superSkillMs > 0) {
       this.superSkillMs = Math.max(0, this.superSkillMs - dtMs);
     }
+    if (this.state === GameState.PLAYING) {
+      if (this.rampBoostL > 0) this.rampBoostL = Math.max(0, this.rampBoostL - dtMs);
+      if (this.rampBoostR > 0) this.rampBoostR = Math.max(0, this.rampBoostR - dtMs);
+    }
     if (this.bossActive && this.state === GameState.PLAYING) {
       this.bossMsLeft -= dtMs;
       if (this.bossMsLeft <= 0) this.bossFail();
@@ -1245,6 +1282,8 @@ export class Game {
     this.pairBullsSox = false;
     this.cityLightsAwarded = false;
     this.hurryUpValue = 0;
+    this.rampBoostL = 0;
+    this.rampBoostR = 0;
     this.expressLit = false;
     this.elFare = 0;
     this.tiltHeat = 0;
@@ -1332,6 +1371,8 @@ export class Game {
       bonusX: this.bonusX,
       ballSaveMs: this.ballSaveMs,
       superSkillMs: this.superSkillMs,
+      rampBoostL: this.rampBoostL,
+      rampBoostR: this.rampBoostR,
       mbSuperLit: this.mbSuperLit,
       mbJackpotValue: this.mbJackpotValue,
       ceremonyTotal: this.state === GameState.BALL_DRAINED ? this.ceremonyTotal : 0,
