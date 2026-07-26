@@ -2051,6 +2051,11 @@ export class Renderer3D {
         );
       }
       const after = 452 + hud.playerScores.length * 30 + 8;
+      if (hud.bestCombo > 1) {
+        ctx.fillStyle = COLOR.NEON_PINK;
+        ctx.font = 'bold 13px "Helvetica Neue", Arial, sans-serif';
+        ctx.fillText(`BEST COMBO  ×${hud.bestCombo}`, PLAYFIELD_W / 2, after + 6);
+      }
       ctx.fillStyle = hud.matched ? COLOR.NEON_GREEN : COLOR.TEXT_DIM;
       ctx.font = 'bold 15px "Helvetica Neue", Arial, sans-serif';
       ctx.fillText(
@@ -2107,6 +2112,7 @@ export class Renderer3D {
     // Instant info — both flippers held. Everything the deep ruleset is
     // tracking, on one panel, so progress is never a mystery.
     if (hud.statusOpen) this.drawStatusPanel(ctx, pf, hud);
+    if (hud.paused) this.drawPausePanel(ctx, hud);
 
     if (hud.tilted) {
       ctx.shadowColor = COLOR.INSERT_RED;
@@ -2118,12 +2124,77 @@ export class Renderer3D {
     }
   }
 
+  /** Pause / settings — the machine frozen, volume on the flippers. */
+  private drawPausePanel(ctx: CanvasRenderingContext2D, hud: HudInfo) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(2, 4, 10, 0.72)';
+    ctx.fillRect(0, 130, PLAYFIELD_W, PLAYFIELD_H - 130);
+
+    const x0 = 60;
+    const y0 = 330;
+    const w = PLAYFIELD_W - 120;
+    const h = 300;
+    ctx.fillStyle = 'rgba(6, 10, 22, 0.96)';
+    ctx.beginPath();
+    ctx.roundRect(x0, y0, w, h, 12);
+    ctx.fill();
+    ctx.strokeStyle = COLOR.BRASS;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '8px';
+    ctx.shadowColor = COLOR.FLAG_RED;
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = COLOR.FLAG_RED;
+    ctx.font = 'bold 34px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText('PAUSED', PLAYFIELD_W / 2 + 4, y0 + 46);
+    ctx.shadowBlur = 0;
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '0px';
+
+    // Volume meter — ten segments, flippers adjust.
+    ctx.fillStyle = COLOR.TEXT_DIM;
+    ctx.font = '11px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText(hud.muted ? 'VOLUME  (MUTED)' : 'VOLUME', PLAYFIELD_W / 2, y0 + 92);
+    const barW = w - 96;
+    const segW = barW / 10;
+    for (let i = 0; i < 10; i++) {
+      const on = !hud.muted && i < Math.round(hud.volume * 10);
+      ctx.fillStyle = on ? COLOR.NEON_GREEN : 'rgba(120, 140, 175, 0.25)';
+      ctx.fillRect(x0 + 48 + i * segW + 2, y0 + 108, segW - 5, 16);
+    }
+    ctx.fillStyle = COLOR.TEXT;
+    ctx.font = 'bold 13px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText(`${Math.round(hud.volume * 100)}%`, PLAYFIELD_W / 2, y0 + 144);
+    ctx.fillStyle = COLOR.TEXT_DIM;
+    ctx.font = '11px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText('FLIPPERS ADJUST · M MUTES', PLAYFIELD_W / 2, y0 + 166);
+
+    // Controls reference, since the title screen is long gone by now.
+    const lines = [
+      'Z / ⁄   flippers        SPACE   plunger',
+      'C / N   nudge           M   mute',
+      'HOLD BOTH FLIPPERS   status report',
+    ];
+    ctx.fillStyle = 'rgba(190, 210, 240, 0.7)';
+    ctx.font = '11px "Helvetica Neue", Arial, sans-serif';
+    lines.forEach((l, i) => ctx.fillText(l, PLAYFIELD_W / 2, y0 + 200 + i * 20));
+
+    if (Math.sin(performance.now() / 300) > 0) {
+      ctx.fillStyle = COLOR.NEON_AMBER;
+      ctx.font = 'bold 15px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText('P / ESC TO RESUME', PLAYFIELD_W / 2, y0 + h - 26);
+    }
+    ctx.restore();
+  }
+
   /** The status report panel (Stern's "instant info"). */
   private drawStatusPanel(ctx: CanvasRenderingContext2D, pf: Playfield, hud: HudInfo) {
     const x0 = 46;
     const y0 = 250;
     const w = PLAYFIELD_W - 92;
-    const h = 392;
+    const h = 422;
     ctx.save();
     ctx.fillStyle = 'rgba(4, 8, 18, 0.9)';
     ctx.beginPath();
@@ -2179,6 +2250,8 @@ export class Renderer3D {
       ['EL EXPRESS', hud.expressLit ? 'LIT' : 'OFF', hud.expressLit],
       ['MYSTERY', hud.mysteryLit ? 'LIT' : 'USED', hud.mysteryLit],
       ['EXTRA BALLS', `${hud.extraBalls}`, hud.extraBalls > 0],
+      ['BEST COMBO', hud.bestCombo > 1 ? `×${hud.bestCombo}` : '—', hud.bestCombo > 1],
+      ['BALL SAVE', hud.ballSaveMs > 0 ? `${Math.ceil(hud.ballSaveMs / 1000)}S` : 'OFF', hud.ballSaveMs > 0],
     ];
     rows.forEach(([label, value, on], i) => {
       const col = i % 2;

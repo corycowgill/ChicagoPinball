@@ -108,6 +108,11 @@ export const MB_SUPER_MULT = 3;
 // last, so re-spelling the bank stays worth the shots.
 export const CHICAGO_SUPER_STEP = 25000;
 
+// Combos: chaining ramp / orbit / scoop / captive shots. Reaching this
+// chain length pays the COMBO MASTER award (once per chain).
+export const COMBO_MASTER_CHAIN = 6;
+export const COMBO_MASTER_AWARD = 75000;
+
 // Status report: hold BOTH flippers this long to see full progress.
 export const STATUS_HOLD_MS = 1200;
 

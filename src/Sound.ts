@@ -35,6 +35,8 @@ export class Sound {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   muted = false;
+  /** 0..1 master volume (persisted); the mixer floor is 0.32 at full. */
+  volume = loadVolume();
 
   private musicMode: MusicMode = 'off';
   private musicStep = 0;
@@ -47,10 +49,18 @@ export class Sound {
       if (!AC) return;
       this.ctx = new AC();
       this.master = this.ctx.createGain();
-      this.master.gain.value = 0.32;
+      this.master.gain.value = 0.32 * this.volume;
       this.master.connect(this.ctx.destination);
     }
     if (this.ctx.state === 'suspended') void this.ctx.resume();
+  }
+
+  /** Nudge the volume in steps; returns the new 0..1 value. */
+  adjustVolume(delta: number): number {
+    this.volume = Math.max(0, Math.min(1, Math.round((this.volume + delta) * 10) / 10));
+    if (this.master) this.master.gain.value = 0.32 * this.volume;
+    saveVolume(this.volume);
+    return this.volume;
   }
 
   toggleMute(): boolean {
@@ -389,5 +399,26 @@ export class Sound {
     // Little question-mark twinkle then the reveal note.
     [784, 988, 784, 988].forEach((f, i) => this.tone(f, 90, { type: 'triangle', vol: 0.22, delayMs: i * 80 }));
     this.tone(1319, 260, { vol: 0.3, delayMs: 360 });
+  }
+}
+
+const VOLUME_KEY = 'chicago-pinball-volume';
+
+function loadVolume(): number {
+  try {
+    const raw = localStorage.getItem(VOLUME_KEY);
+    if (raw === null) return 1;
+    const v = Number(raw);
+    return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function saveVolume(v: number) {
+  try {
+    localStorage.setItem(VOLUME_KEY, String(v));
+  } catch {
+    /* private mode — volume just isn't remembered */
   }
 }
