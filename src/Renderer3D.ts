@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import Matter from 'matter-js';
 import { Playfield } from './scene/Playfield';
 import { Renderer, HudInfo } from './Renderer';
@@ -96,16 +97,37 @@ export class Renderer3D {
   // Impact sparks: a shared pool of tiny emissive motes thrown off by
   // bumper / sling / drop-target hits. Fade by shrinking (no per-particle
   // material, so the pool stays cheap).
-  private sparkPool: THREE.Mesh[] = [];
+  /** One InstancedMesh per spark colour: a bumper storm during multiball
+   *  used to cost one draw call per mote (up to 90); now it's one per
+   *  colour no matter how many are alive. */
+  private sparkGroups = new Map<
+    string,
+    { mesh: THREE.InstancedMesh; free: number[] }
+  >();
   private sparks: {
-    mesh: THREE.Mesh;
+    color: string;
+    idx: number;
+    x: number;
+    y: number;
+    z: number;
     vx: number;
     vy: number;
     vz: number;
     life: number;
     max: number;
   }[] = [];
-  private sparkMats = new Map<string, THREE.MeshBasicMaterial>();
+  /** One geometry shared by every spark (was one per particle). */
+  private sparkGeo = new THREE.SphereGeometry(2.2, 6, 4);
+  private static readonly SPARKS_PER_COLOR = 48;
+  private sparkMatrix = new THREE.Matrix4();
+  /** Trail ghost geometries, cached per position in the trail. */
+  private trailGeos: THREE.SphereGeometry[] = [];
+  /** Static furniture accumulated during build, merged into one mesh per
+   *  material at the end — the playfield has ~90 posts/rails/rings and
+   *  they were costing ~90 draw calls a frame. */
+  private staticChrome: THREE.BufferGeometry[] = [];
+  private staticRail: THREE.BufferGeometry[] = [];
+  private staticRubber: THREE.BufferGeometry[] = [];
   private prevBumperFlash: number[] = [];
   private prevSlingFlash: number[] = [];
   private prevDropHit: boolean[] = [];
@@ -220,28 +242,36 @@ export class Renderer3D {
 
   /** Throw a burst of sparks from a playfield point (2D x,z + height). */
   private spawnSparks(x: number, z: number, y: number, color: string, count: number) {
-    if (this.sparks.length > 90) return; // hard cap protects mobile
-    let mat = this.sparkMats.get(color);
-    if (!mat) {
-      mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(color) });
-      this.sparkMats.set(color, mat);
+    const cap = Renderer3D.SPARKS_PER_COLOR;
+    let group = this.sparkGroups.get(color);
+    if (!group) {
+      const mesh = new THREE.InstancedMesh(
+        this.sparkGeo,
+        new THREE.MeshBasicMaterial({ color: new THREE.Color(color) }),
+        cap,
+      );
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.frustumCulled = false;
+      // Park every instance at zero scale until it's claimed.
+      const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+      for (let i = 0; i < cap; i++) mesh.setMatrixAt(i, zero);
+      this.scene.add(mesh);
+      group = { mesh, free: Array.from({ length: cap }, (_, i) => i) };
+      this.sparkGroups.set(color, group);
     }
     const n = this.quality === 'mobile' ? Math.ceil(count / 2) : count;
     for (let i = 0; i < n; i++) {
-      let mesh = this.sparkPool.pop();
-      if (!mesh) {
-        mesh = new THREE.Mesh(new THREE.SphereGeometry(2.2, 6, 4), mat);
-        this.scene.add(mesh);
-      }
-      mesh.material = mat;
-      mesh.visible = true;
-      mesh.scale.setScalar(1);
-      mesh.position.set(x, y, z);
+      const idx = group.free.pop();
+      if (idx === undefined) return; // this colour is saturated
       const a = Math.random() * Math.PI * 2;
       const speed = 1.6 + Math.random() * 2.6;
       const max = 260 + Math.random() * 220;
       this.sparks.push({
-        mesh,
+        color,
+        idx,
+        x,
+        y,
+        z,
         vx: Math.cos(a) * speed,
         vy: 1.2 + Math.random() * 2.4,
         vz: Math.sin(a) * speed,
@@ -252,25 +282,37 @@ export class Renderer3D {
   }
 
   private tickSparks(dtMs: number) {
+    if (this.sparks.length === 0) return;
     const f = dtMs / 16.667;
+    const touched = new Set<string>();
+    const zero = 0;
     for (let i = this.sparks.length - 1; i >= 0; i--) {
       const p = this.sparks[i];
+      const group = this.sparkGroups.get(p.color)!;
+      touched.add(p.color);
       p.life -= dtMs;
       if (p.life <= 0) {
-        p.mesh.visible = false;
-        this.sparkPool.push(p.mesh);
+        this.sparkMatrix.makeScale(zero, zero, zero);
+        group.mesh.setMatrixAt(p.idx, this.sparkMatrix);
+        group.free.push(p.idx);
         this.sparks.splice(i, 1);
         continue;
       }
       p.vy -= 0.32 * f; // gravity pulls the motes back to the wood
-      p.mesh.position.x += p.vx * f;
-      p.mesh.position.y += p.vy * f;
-      p.mesh.position.z += p.vz * f;
-      if (p.mesh.position.y < 2) {
-        p.mesh.position.y = 2;
+      p.x += p.vx * f;
+      p.y += p.vy * f;
+      p.z += p.vz * f;
+      if (p.y < 2) {
+        p.y = 2;
         p.vy *= -0.35;
       }
-      p.mesh.scale.setScalar(Math.max(0.05, p.life / p.max));
+      const s = Math.max(0.05, p.life / p.max);
+      this.sparkMatrix.makeScale(s, s, s);
+      this.sparkMatrix.setPosition(p.x, p.y, p.z);
+      group.mesh.setMatrixAt(p.idx, this.sparkMatrix);
+    }
+    for (const c of touched) {
+      this.sparkGroups.get(c)!.mesh.instanceMatrix.needsUpdate = true;
     }
   }
 
@@ -342,6 +384,8 @@ export class Renderer3D {
     this.buildRampsAndWireforms(pf);
     this.buildAttractions(pf);
     this.buildLamps(pf);
+    // Everything static and chrome collapses into three meshes.
+    this.flushStaticGeometry();
     if (new URLSearchParams(location.search).has('debug')) this.buildDebug(pf);
   }
 
@@ -672,45 +716,74 @@ export class Renderer3D {
       const body = w.body;
       const radius = (body as unknown as { circleRadius?: number }).circleRadius;
       if (radius) {
-        const post = new THREE.Mesh(
+        this.addStatic(
+          this.staticRail,
           new THREE.CylinderGeometry(radius, radius, 26, 16),
-          this.railMat,
+          body.position.x,
+          13,
+          body.position.y,
         );
-        post.position.set(body.position.x, 13, body.position.y);
-        post.castShadow = true;
-        const ring = new THREE.Mesh(
-          new THREE.TorusGeometry(radius + 0.6, 2, 8, 16),
-          this.rubberMat,
-        );
-        ring.rotation.x = -Math.PI / 2;
-        ring.position.set(body.position.x, 12, body.position.y);
-        this.scene.add(post, ring);
+        this.addRubberRing(radius + 0.6, 2, body.position.x, 12, body.position.y);
         continue;
       }
       const v = w.outline;
       if (v.length < 4) continue;
       const len = Math.hypot(v[1].x - v[0].x, v[1].y - v[0].y);
       const thick = Math.hypot(v[2].x - v[1].x, v[2].y - v[1].y);
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 22, thick), this.railMat);
-      rail.position.set(body.position.x, 11, body.position.y);
-      rail.rotation.y = -Math.atan2(v[1].y - v[0].y, v[1].x - v[0].x);
-      rail.castShadow = true;
-      this.scene.add(rail);
+      this.addStatic(
+        this.staticRail,
+        new THREE.BoxGeometry(len, 22, thick),
+        body.position.x,
+        11,
+        body.position.y,
+        -Math.atan2(v[1].y - v[0].y, v[1].x - v[0].x),
+      );
     }
     for (const p of pf.postPositions) {
-      const post = new THREE.Mesh(
-        new THREE.CylinderGeometry(p.r ?? 5, (p.r ?? 5) + 1, 20, 14),
-        this.railMat,
-      );
-      post.position.set(p.x, 10, p.y);
-      post.castShadow = true;
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry((p.r ?? 5) + 0.6, 1.8, 8, 14),
-        this.rubberMat,
-      );
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.set(p.x, 10, p.y);
-      this.scene.add(post, ring);
+      const r = p.r ?? 5;
+      this.addStatic(this.staticRail, new THREE.CylinderGeometry(r, r + 1, 20, 14), p.x, 10, p.y);
+      this.addRubberRing(r + 0.6, 1.8, p.x, 10, p.y);
+    }
+  }
+
+  /** Bake one piece of static furniture into a merge bucket. */
+  private addStatic(
+    bucket: THREE.BufferGeometry[],
+    geo: THREE.BufferGeometry,
+    x: number,
+    y: number,
+    z: number,
+    rotY = 0,
+  ) {
+    if (rotY) geo.applyMatrix4(new THREE.Matrix4().makeRotationY(rotY));
+    geo.translate(x, y, z);
+    bucket.push(geo);
+  }
+
+  private addRubberRing(radius: number, tube: number, x: number, y: number, z: number) {
+    const geo = new THREE.TorusGeometry(radius, tube, 8, 14);
+    geo.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+    geo.translate(x, y, z);
+    this.staticRubber.push(geo);
+  }
+
+  /** Collapse every baked bucket into a single mesh per material. */
+  private flushStaticGeometry() {
+    const buckets: Array<[THREE.BufferGeometry[], THREE.Material]> = [
+      [this.staticRail, this.railMat],
+      [this.staticChrome, this.chromeMat],
+      [this.staticRubber, this.rubberMat],
+    ];
+    for (const [geos, mat] of buckets) {
+      if (geos.length === 0) continue;
+      const merged = mergeGeometries(geos, false);
+      geos.forEach((g) => g.dispose());
+      geos.length = 0;
+      if (!merged) continue;
+      const mesh = new THREE.Mesh(merged, mat);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
     }
   }
 
@@ -830,24 +903,24 @@ export class Renderer3D {
       const laneTop = cy - 74;
       const wallLen = 70;
       for (const sx of [cx - 23, cx + 23]) {
-        const rail = new THREE.Mesh(new THREE.BoxGeometry(6, 22, wallLen), this.railMat);
-        rail.position.set(sx, 11, laneTop + wallLen / 2);
-        rail.castShadow = true;
-        this.scene.add(rail);
-      }
-      const cap = new THREE.Mesh(new THREE.BoxGeometry(52, 22, 6), this.railMat);
-      cap.position.set(cx, 11, laneTop - 3);
-      this.scene.add(cap);
-      for (const p of pf.captive.posts) {
-        const post = new THREE.Mesh(
-          new THREE.CylinderGeometry(p.r, p.r + 1, 20, 12),
-          this.railMat,
+        this.addStatic(
+          this.staticRail,
+          new THREE.BoxGeometry(6, 22, wallLen),
+          sx,
+          11,
+          laneTop + wallLen / 2,
         );
-        post.position.set(p.x, 10, p.y);
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(p.r + 0.6, 1.6, 8, 14), this.rubberMat);
-        ring.rotation.x = -Math.PI / 2;
-        ring.position.set(p.x, 10, p.y);
-        this.scene.add(post, ring);
+      }
+      this.addStatic(this.staticRail, new THREE.BoxGeometry(52, 22, 6), cx, 11, laneTop - 3);
+      for (const p of pf.captive.posts) {
+        this.addStatic(
+          this.staticRail,
+          new THREE.CylinderGeometry(p.r, p.r + 1, 20, 12),
+          p.x,
+          10,
+          p.y,
+        );
+        this.addRubberRing(p.r + 0.6, 1.6, p.x, 10, p.y);
       }
     }
     // Captive lane ball + spinner blade.
@@ -933,12 +1006,13 @@ export class Renderer3D {
       // Support posts where the channel is high (over quiet floor).
       for (const i of [Math.floor(n * 0.55), n - 2]) {
         const p = pts[i];
-        const post = new THREE.Mesh(
+        this.addStatic(
+          this.staticChrome,
           new THREE.CylinderGeometry(1.6, 1.6, p.y, 8),
-          this.chromeMat,
+          p.x,
+          p.y / 2,
+          p.z,
         );
-        post.position.set(p.x, p.y / 2, p.z);
-        this.scene.add(post);
       }
       // Wireform return: twin chrome rails + crossbar rings.
       const hn = ramp.habitrail.length;
@@ -1737,8 +1811,11 @@ export class Renderer3D {
     const needed = pf.balls.length * LEN;
     while (this.trailMeshes.length < needed) {
       const i = this.trailMeshes.length % LEN;
+      if (!this.trailGeos[i]) {
+        this.trailGeos[i] = new THREE.SphereGeometry(BALL_RADIUS * (0.75 - i * 0.09), 10, 8);
+      }
       const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(BALL_RADIUS * (0.75 - i * 0.09), 10, 8),
+        this.trailGeos[i],
         new THREE.MeshBasicMaterial({
           color: 0xbfd8ff,
           transparent: true,
