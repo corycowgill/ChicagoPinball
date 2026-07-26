@@ -17,6 +17,10 @@ import {
   CAPTIVE_SPOT_MS,
   RAMP_BOOST_MS,
   RAMP_BOOST_MULT,
+  LOOPS_FOR_PF_X,
+  PF_X_MAX,
+  PF_X_MS,
+  SPINNER_STEP,
   COMBO_MASTER_CHAIN,
   COMBO_MASTER_AWARD,
   BOSS_HP,
@@ -149,6 +153,10 @@ export class Game {
   private get cur(): PlayerState {
     return this.players[this.current];
   }
+  /** Points per spinner revolution — grows with every CHICAGO completion. */
+  private get spinnerValue(): number {
+    return POINTS.SPINNER_REV + SPINNER_STEP * this.cur.chicagoCompletions;
+  }
   private get score(): number {
     return this.cur.score;
   }
@@ -214,6 +222,12 @@ export class Game {
   private rampBoostR = 0;
   /** Last time a captive strike spotted a CHICAGO letter. */
   private lastCaptiveSpotAt = -1e9;
+
+  // 2X / 3X PLAYFIELD: the orbits charge it, and while it runs every
+  // playfield shot pays that multiple.
+  private pfX = 1;
+  private pfXMs = 0;
+  private loopCharge = 0;
 
   // Status report: both flippers held opens the progress panel.
   private statusHoldMs = 0;
@@ -396,6 +410,33 @@ export class Game {
     // Bank end-of-ball bonus units.
     this.bonusUnits = Math.min(99, this.bonusUnits + (BONUS_UNITS[e.kind] ?? 0));
 
+    // The spinner arrives as one event carrying the whole rip. Re-price it
+    // at the current spinner value — spelling CHICAGO makes the rip matter.
+    if (e.kind === 'spinner') {
+      const revs = Math.max(1, Math.round(e.points / POINTS.SPINNER_REV));
+      pts = revs * this.spinnerValue;
+    }
+
+    // Orbits charge the playfield multiplier. At the cap the loops keep
+    // refreshing the clock instead, so a looping player can hold 3X.
+    if (e.kind === 'loop') {
+      this.loopCharge++;
+      if (this.loopCharge >= LOOPS_FOR_PF_X) {
+        this.loopCharge = 0;
+        const stepped = this.pfX < PF_X_MAX;
+        if (stepped) this.pfX++;
+        this.pfXMs = PF_X_MS;
+        this.renderer.pushToast(
+          stepped ? `${this.pfX}× PLAYFIELD` : `${this.pfX}× EXTENDED`,
+          COLOR.NEON_AMBER,
+          1600,
+        );
+        this.renderer.triggerJackpotFlash();
+        this.sound.jackpot();
+        if (stepped) this.sound.speak(`${this.pfX} times playfield!`, true);
+      }
+    }
+
     // Combo: chained ramp / loop / scoop / captive shots inside the window.
     if (e.kind === 'ramp' || e.kind === 'loop' || e.kind === 'scoop' || e.kind === 'captive') {
       if (this.timeMs - this.lastComboAt < COMBO_WINDOW_MS) {
@@ -499,6 +540,10 @@ export class Game {
         if (this.bossHp <= 0) this.bossDefeat();
       }
     }
+    // 2X / 3X PLAYFIELD multiplies everything the playfield pays. The skill
+    // shot is exempt — it is awarded at the plunge, not shot for.
+    if (this.pfX > 1 && e.kind !== 'skill-shot') pts *= this.pfX;
+
     this.score += pts;
     this.checkReplay();
 
@@ -1202,6 +1247,14 @@ export class Game {
     if (this.state === GameState.PLAYING) {
       if (this.rampBoostL > 0) this.rampBoostL = Math.max(0, this.rampBoostL - dtMs);
       if (this.rampBoostR > 0) this.rampBoostR = Math.max(0, this.rampBoostR - dtMs);
+      if (this.pfXMs > 0) {
+        this.pfXMs = Math.max(0, this.pfXMs - dtMs);
+        if (this.pfXMs === 0 && this.pfX > 1) {
+          this.pfX = 1;
+          this.loopCharge = 0;
+          this.renderer.pushToast('PLAYFIELD ×1', COLOR.TEXT_DIM, 1000);
+        }
+      }
     }
     if (this.bossActive && this.state === GameState.PLAYING) {
       this.bossMsLeft -= dtMs;
@@ -1304,6 +1357,9 @@ export class Game {
     this.rampBoostL = 0;
     this.rampBoostR = 0;
     this.lastCaptiveSpotAt = -1e9;
+    this.pfX = 1;
+    this.pfXMs = 0;
+    this.loopCharge = 0;
     this.expressLit = false;
     this.elFare = 0;
     this.tiltHeat = 0;
@@ -1391,6 +1447,9 @@ export class Game {
       bonusX: this.bonusX,
       ballSaveMs: this.ballSaveMs,
       superSkillMs: this.superSkillMs,
+      pfX: this.pfX,
+      pfXMs: this.pfXMs,
+      loopCharge: this.loopCharge,
       rampBoostL: this.rampBoostL,
       rampBoostR: this.rampBoostR,
       mbSuperLit: this.mbSuperLit,

@@ -88,6 +88,10 @@ export interface HudInfo {
   /** Ms left on each ramp's inlane-lit double value. */
   rampBoostL: number;
   rampBoostR: number;
+  /** 2X / 3X PLAYFIELD: current multiple, ms left, and orbits toward the next. */
+  pfX: number;
+  pfXMs: number;
+  loopCharge: number;
   /** Lake Shore Multiball: SUPER lit at the Bean + current jackpot value. */
   mbSuperLit: boolean;
   mbJackpotValue: number;
