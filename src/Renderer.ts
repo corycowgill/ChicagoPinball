@@ -61,6 +61,14 @@ export interface HudInfo {
   expressLit: boolean;
   /** Instant-info panel open (both flippers held). */
   statusOpen: boolean;
+  /** Machine paused — everything frozen. */
+  paused: boolean;
+  /** 0..1 master volume + mute state (shown on the pause panel). */
+  volume: number;
+  muted: boolean;
+  /** Longest combo chain this game, and the live chain (0 = none). */
+  bestCombo: number;
+  comboChain: number;
   /** Bonus X waiting to carry into this player's next ball. */
   heldBonusX: number;
   /** Pop-bumper fare progress toward lighting the EL EXPRESS. */

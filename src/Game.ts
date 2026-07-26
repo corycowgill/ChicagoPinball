@@ -14,6 +14,8 @@ import {
   BONUS_UNIT,
   MAX_BONUS_X,
   COMBO_WINDOW_MS,
+  COMBO_MASTER_CHAIN,
+  COMBO_MASTER_AWARD,
   BOSS_HP,
   BOSS_MS,
   MB_JACKPOT_BASE,
@@ -55,6 +57,8 @@ interface PlayerState {
   heldBonusX: number;
   /** How many times this player has spelled CHICAGO (escalates the super). */
   chicagoCompletions: number;
+  /** Longest combo chain this player has strung together this game. */
+  bestCombo: number;
 }
 
 function newPlayer(): PlayerState {
@@ -69,6 +73,7 @@ function newPlayer(): PlayerState {
     crosstownDone: false,
     heldBonusX: 0,
     chicagoCompletions: 0,
+    bestCombo: 0,
   };
 }
 
@@ -204,6 +209,11 @@ export class Game {
   // Status report: both flippers held opens the progress panel.
   private statusHoldMs = 0;
   private statusOpen = false;
+
+  /** Paused (P / Esc) — the whole machine freezes, including every timer. */
+  private paused = false;
+  /** COMBO MASTER already paid for the current chain. */
+  private comboMasterPaid = false;
 
   // End-of-ball bonus ceremony (DMD count-up while BALL_DRAINED).
   private ceremonyTotal = 0;
@@ -364,12 +374,31 @@ export class Game {
     if (e.kind === 'ramp' || e.kind === 'loop' || e.kind === 'scoop' || e.kind === 'captive') {
       if (this.timeMs - this.lastComboAt < COMBO_WINDOW_MS) {
         this.comboCount++;
+        const chain = this.comboCount + 1;
         const comboPts = this.comboCount * POINTS.COMBO;
         pts += comboPts;
-        this.renderer.pushToast(`COMBO ×${this.comboCount + 1} +${comboPts.toLocaleString()}`, COLOR.NEON_PINK, 900);
+        if (chain > this.cur.bestCombo) this.cur.bestCombo = chain;
+        this.renderer.pushToast(`COMBO ×${chain} +${comboPts.toLocaleString()}`, COLOR.NEON_PINK, 900);
         this.sound.combo(this.comboCount);
+        if (chain === 4) this.sound.speak('Combo!', true);
+        // Stringing a long chain is the hardest thing on the board — pay it.
+        if (chain >= COMBO_MASTER_CHAIN && !this.comboMasterPaid) {
+          this.comboMasterPaid = true;
+          pts += COMBO_MASTER_AWARD;
+          this.renderer.pushToast(
+            `COMBO MASTER +${COMBO_MASTER_AWARD.toLocaleString()}`,
+            COLOR.NEON_AMBER,
+            2000,
+          );
+          this.renderer.triggerJackpotFlash();
+          this.renderer.kick(5);
+          this.sound.jackpot();
+          this.sound.crowd(1400, 0.24);
+          this.sound.speak('Combo master!', true);
+        }
       } else {
         this.comboCount = 0;
+        this.comboMasterPaid = false;
       }
       this.lastComboAt = this.timeMs;
     }
@@ -927,6 +956,34 @@ export class Game {
   }
 
   update(dtMs: number) {
+    // ── PAUSE (P / Esc) — only with a ball in play. Freezes physics and
+    //    every timer; the flippers double as a volume control while held.
+    const canPause =
+      this.state === GameState.PLAYING ||
+      this.state === GameState.READY ||
+      this.state === GameState.BALL_DRAINED;
+    if (this.input.wasPressed('pause') && canPause) {
+      this.paused = !this.paused;
+      if (this.paused) {
+        this.sound.stopMusic();
+        this.statusOpen = false;
+        this.statusHoldMs = 0;
+      } else {
+        this.syncMusic();
+      }
+      this.sound.dropTarget();
+    }
+    if (this.paused) {
+      if (this.input.wasPressed('leftFlipper')) this.announceVolume(this.sound.adjustVolume(-0.1));
+      if (this.input.wasPressed('rightFlipper')) this.announceVolume(this.sound.adjustVolume(0.1));
+      if (this.input.wasPressed('mute')) {
+        const muted = this.sound.toggleMute();
+        this.renderer.pushToast(muted ? 'SOUND OFF' : 'SOUND ON', COLOR.TEXT_DIM, 800);
+      }
+      this.input.endFrame();
+      return;
+    }
+
     this.timeMs += dtMs;
 
     if (this.input.wasPressed('mute')) {
@@ -1148,6 +1205,11 @@ export class Game {
     }
   }
 
+  private announceVolume(v: number) {
+    this.renderer.pushToast(`VOLUME ${Math.round(v * 100)}%`, COLOR.NEON_CYAN, 900);
+    if (v > 0) this.sound.rollover();
+  }
+
   private startNextBall() {
     this.playfield.resetBall();
     this.bonusUnits = 0;
@@ -1158,6 +1220,7 @@ export class Game {
       this.cur.heldBonusX = 0;
     }
     this.comboCount = 0;
+    this.comboMasterPaid = false;
     this.lastComboAt = -1e9;
     this.activeSport = -1;
     this.crosstownActive = false;
@@ -1237,6 +1300,11 @@ export class Game {
       mysteryLit: this.mysteryLit,
       expressLit: this.expressLit,
       statusOpen: this.statusOpen,
+      paused: this.paused,
+      volume: this.sound.volume,
+      muted: this.sound.muted,
+      bestCombo: this.cur.bestCombo,
+      comboChain: this.timeMs - this.lastComboAt < COMBO_WINDOW_MS ? this.comboCount + 1 : 0,
       heldBonusX: this.cur.heldBonusX,
       elFare: this.elFare,
       elFareNeeded: EXPRESS_FARE_HITS,
@@ -1293,7 +1361,9 @@ export class Game {
     this.bonusUnits = 0;
     this.bonusX = 1;
     this.comboCount = 0;
+    this.comboMasterPaid = false;
     this.lastComboAt = -1e9;
+    this.paused = false;
     this.bossActive = false;
     this.bossHp = BOSS_HP;
     this.bossMsLeft = 0;
