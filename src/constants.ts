@@ -112,6 +112,20 @@ export const CHICAGO_SUPER_STEP = 25000;
 // this often — the drop banks alone can't spell it inside three balls.
 export const CAPTIVE_SPOT_MS = 2500;
 
+// 2X / 3X PLAYFIELD — the orbits charge it. Every LOOPS_FOR_PF_X loops
+// steps the multiplier up (and refreshes the clock), and while it runs
+// every playfield shot pays that multiple. Measured: the best plunge was
+// worth 65,000 — 26 ramps — so the playfield needed a way to out-earn a
+// guaranteed award instead of the plunge being most of a game's score.
+export const LOOPS_FOR_PF_X = 3;
+export const PF_X_MAX = 3;
+export const PF_X_MS = 22000;
+
+// The spinner sits on the right-ramp return and pays per revolution. At a
+// flat 25 a rev the longest rip on the board paid less than a slingshot;
+// each CHICAGO completion now adds this much to the per-rev value.
+export const SPINNER_STEP = 250;
+
 // Inlane rollovers light the ramp that the receiving flipper can shoot,
 // for this long — the return feeds the shot, like a real machine.
 export const RAMP_BOOST_MS = 6000;

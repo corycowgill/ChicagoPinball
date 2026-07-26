@@ -15,6 +15,9 @@ import {
   FLIPPER_HEIGHT,
   CHICAGO,
   BOSS_HP,
+  LOOPS_FOR_PF_X,
+  POINTS,
+  SPINNER_STEP,
   COLOR,
 } from './constants';
 
@@ -92,6 +95,8 @@ export class Renderer3D {
       | { t: 'save' }
       | { t: 'inlane'; side: 'L' | 'R' }
       | { t: 'rampboost'; side: 'L' | 'R' }
+      // The 2X / 3X PLAYFIELD ladder: lamp i lights at multiple i + 2.
+      | { t: 'pfx'; i: number }
       | { t: 'loop'; i: number };
   }[] = [];
   private floodlights: THREE.SpotLight[] = [];
@@ -1521,6 +1526,10 @@ export class Renderer3D {
     lockSpots.forEach(([x, z], i) => lamp(x, z, 5, '#ff3a4f', { t: 'lock', i }));
     lamp(pf.lakeMichiganScoop.x, pf.lakeMichiganScoop.y - 34, 7, '#4ea0d8', { t: 'mystery' });
     pf.loopArrowXs.forEach((x, i) => lamp(x, 590, 8, '#7fd1e8', { t: 'loop', i }));
+    // 2X / 3X PLAYFIELD ladder, on the centre line under the stadium where
+    // it reads at a glance — it changes what every other shot is worth.
+    lamp(pf.playCenter - 15, 664, 8, '#ffb547', { t: 'pfx', i: 0 });
+    lamp(pf.playCenter + 15, 664, 8, '#ffb547', { t: 'pfx', i: 1 });
   }
 
   /** ?debug — show collision geometry as red wireframes. */
@@ -1956,6 +1965,16 @@ export class Renderer3D {
         const ms = k.side === 'L' ? hud.rampBoostL : hud.rampBoostR;
         // Urgent strobe in the final second before the double expires.
         on = ms > 0 && (ms > 1000 ? Math.sin(now / 100) > -0.3 : Math.sin(now / 55) > 0);
+      } else if (k.t === 'pfx') {
+        // Lamp 0 = 2X, lamp 1 = 3X; both strobe hard in the last second.
+        const level = k.i + 2;
+        on =
+          hud.pfX >= level &&
+          (hud.pfXMs > 1500 ? Math.sin(now / 130) > -0.4 : Math.sin(now / 55) > 0);
+        // Not yet lit: pulse a hint as the orbits charge toward the step-up.
+        if (!on && hud.pfX === level - 1 && hud.loopCharge > 0) {
+          on = Math.sin(now / 200 + hud.loopCharge) > 0.8;
+        }
       } else if (k.t === 'kickback') on = hud.kickbackLit && blink;
       else if (k.t === 'express') on = hud.expressLit && blink;
       else if (k.t === 'lock') on = k.i < pf.bean.locked;
@@ -2375,8 +2394,20 @@ export class Renderer3D {
     // Two columns of everything else.
     const rows: Array<[string, string, boolean]> = [
       ['BONUS', `×${hud.bonusX}${hud.heldBonusX > 0 ? ` · HOLD ×${hud.heldBonusX}` : ''}`, hud.bonusX > 1],
+      [
+        'PLAYFIELD',
+        hud.pfX > 1
+          ? `×${hud.pfX} · ${Math.ceil(hud.pfXMs / 1000)}S`
+          : `×1 · ${hud.loopCharge}/${LOOPS_FOR_PF_X} ORBITS`,
+        hud.pfX > 1,
+      ],
       ['LOCKS', `${pf.bean.locked}/3`, pf.bean.locked > 0],
       ['CHICAGO', hud.chicagoCompletions > 0 ? `×${hud.chicagoCompletions}` : '—', hud.chicagoCompletions > 0],
+      [
+        'SPINNER',
+        `${(POINTS.SPINNER_REV + SPINNER_STEP * hud.chicagoCompletions).toLocaleString()}/REV`,
+        hud.chicagoCompletions > 0,
+      ],
       ['EL FARE', `${Math.min(hud.elFare, hud.elFareNeeded)}/${hud.elFareNeeded}`, hud.elFare > 0],
       ['KICKBACK', hud.kickbackLit ? 'LIT' : 'OFF', hud.kickbackLit],
       ['EL EXPRESS', hud.expressLit ? 'LIT' : 'OFF', hud.expressLit],
