@@ -90,6 +90,25 @@ export class ChicagoBank {
     this.resetTimer = 0;
   }
 
+  /** Spot the next standing letter — awarded by the captive-ball shot, so
+   *  CHICAGO is reachable in a game without living on the drop banks.
+   *  Returns the letter spotted (and whether that completed the set), or
+   *  null when every target is already down. */
+  spotLetter(): { letter: string; completed: boolean } | null {
+    const target = this.targets.find((t) => !t.hit);
+    if (!target) return null;
+    target.hit = true;
+    const idx = this.targets.indexOf(target);
+    this.knocked |= 1 << idx;
+    this.orderBonusActive = false;
+    this.physics.defer(() => {
+      this.physics.remove(target.body);
+    });
+    const completed = this.knocked === (1 << this.targets.length) - 1;
+    if (completed) this.resetTimer = 1500;
+    return { letter: target.letter, completed };
+  }
+
   litMask(): boolean[] {
     return this.targets.map((t) => t.hit);
   }

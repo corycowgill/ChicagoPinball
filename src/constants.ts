@@ -108,6 +108,10 @@ export const MB_SUPER_MULT = 3;
 // last, so re-spelling the bank stays worth the shots.
 export const CHICAGO_SUPER_STEP = 25000;
 
+// A solid captive-ball strike spots the next CHICAGO letter, at most
+// this often — the drop banks alone can't spell it inside three balls.
+export const CAPTIVE_SPOT_MS = 2500;
+
 // Inlane rollovers light the ramp that the receiving flipper can shoot,
 // for this long — the return feeds the shot, like a real machine.
 export const RAMP_BOOST_MS = 6000;
@@ -142,7 +146,9 @@ export const POINTS = {
   SPINNER_REV: 25,
   RAMP: 2500,
   SCOOP: 5000,
-  CAPTIVE_BALL: 750,
+  // The captive is a precise rip up a narrow lane — it was paying less
+  // than a lane rollover for the hardest shot on the machine.
+  CAPTIVE_BALL: 3000,
   LOCK: 5000,
   SUPER_JACKPOT: 50000,
   SUPER_SKILL: 40000,
