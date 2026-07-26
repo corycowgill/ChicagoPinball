@@ -15,6 +15,7 @@ export type ScoreEventKind =
   | 'spinner'
   | 'skill-shot'
   | 'lane'
+  | 'inlane'
   | 'loop'
   | 'ramp'
   | 'scoop'

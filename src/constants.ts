@@ -108,6 +108,11 @@ export const MB_SUPER_MULT = 3;
 // last, so re-spelling the bank stays worth the shots.
 export const CHICAGO_SUPER_STEP = 25000;
 
+// Inlane rollovers light the ramp that the receiving flipper can shoot,
+// for this long — the return feeds the shot, like a real machine.
+export const RAMP_BOOST_MS = 6000;
+export const RAMP_BOOST_MULT = 2;
+
 // Combos: chaining ramp / orbit / scoop / captive shots. Reaching this
 // chain length pays the COMBO MASTER award (once per chain).
 export const COMBO_MASTER_CHAIN = 6;
@@ -144,6 +149,7 @@ export const POINTS = {
   SKILL_SHOT_SIDE: 10000,
   SKILL_SHOT_CENTER: 25000,
   LANE: 2000,
+  INLANE: 750,
   COMBO: 1500,
   LOOP: 3000,
   BOSS_DEFEAT: 250000,
