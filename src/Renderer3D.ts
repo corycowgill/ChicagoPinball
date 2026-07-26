@@ -317,6 +317,7 @@ export class Renderer3D {
   }
 
   tick(dtMs: number) {
+    this.dmd.tick(dtMs);
     this.tickSparks(dtMs);
     for (const t of this.toasts) t.ttl -= dtMs;
     this.toasts = this.toasts.filter((t) => t.ttl > 0);
@@ -2186,6 +2187,27 @@ export class Renderer3D {
       }
     }
 
+    // Touch machines get a visible pause button (keyboards have P / Esc).
+    if (
+      this.quality === 'mobile' &&
+      !hud.paused &&
+      (hud.state === GameState.PLAYING || hud.state === GameState.READY)
+    ) {
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = '#050a14';
+      ctx.beginPath();
+      ctx.roundRect(14, 96, 40, 40, 9);
+      ctx.fill();
+      ctx.strokeStyle = COLOR.BRASS;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = COLOR.TEXT;
+      ctx.fillRect(27, 106, 5, 20);
+      ctx.fillRect(37, 106, 5, 20);
+      ctx.restore();
+    }
+
     // Instant info — both flippers held. Everything the deep ruleset is
     // tracking, on one panel, so progress is never a mystery.
     if (hud.statusOpen) this.drawStatusPanel(ctx, pf, hud);
@@ -2248,20 +2270,39 @@ export class Renderer3D {
     ctx.font = '11px "Helvetica Neue", Arial, sans-serif';
     ctx.fillText('FLIPPERS ADJUST · M MUTES', PLAYFIELD_W / 2, y0 + 166);
 
-    // Controls reference, since the title screen is long gone by now.
-    const lines = [
-      'Z / ⁄   flippers        SPACE   plunger',
-      'C / N   nudge           M   mute',
-      'HOLD BOTH FLIPPERS   status report',
-    ];
+    // Controls reference, since the title screen is long gone by now —
+    // and on a phone the keyboard list would be useless.
+    const lines =
+      this.quality === 'mobile'
+        ? [
+            'TAP SIDES   flippers',
+            'HOLD LOWER RIGHT   plunger',
+            'HOLD BOTH SIDES   status report',
+          ]
+        : [
+            'Z / ⁄   flippers        SPACE   plunger',
+            'C / N   nudge           M   mute',
+            'HOLD BOTH FLIPPERS   status report',
+          ];
     ctx.fillStyle = 'rgba(190, 210, 240, 0.7)';
     ctx.font = '11px "Helvetica Neue", Arial, sans-serif';
     lines.forEach((l, i) => ctx.fillText(l, PLAYFIELD_W / 2, y0 + 200 + i * 20));
 
+    // The resume target doubles as the touch button (see resolveTouchKey).
+    const btnY = y0 + h - 46;
+    ctx.strokeStyle = COLOR.NEON_AMBER;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(PLAYFIELD_W / 2 - 96, btnY, 192, 34, 8);
+    ctx.stroke();
     if (Math.sin(performance.now() / 300) > 0) {
       ctx.fillStyle = COLOR.NEON_AMBER;
-      ctx.font = 'bold 15px "Helvetica Neue", Arial, sans-serif';
-      ctx.fillText('P / ESC TO RESUME', PLAYFIELD_W / 2, y0 + h - 26);
+      ctx.font = 'bold 14px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText(
+        this.quality === 'mobile' ? 'TAP TO RESUME' : 'P / ESC TO RESUME',
+        PLAYFIELD_W / 2,
+        btnY + 18,
+      );
     }
     ctx.restore();
   }
