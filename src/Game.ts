@@ -14,6 +14,7 @@ import {
   BONUS_UNIT,
   MAX_BONUS_X,
   COMBO_WINDOW_MS,
+  CAPTIVE_SPOT_MS,
   RAMP_BOOST_MS,
   RAMP_BOOST_MULT,
   COMBO_MASTER_CHAIN,
@@ -211,6 +212,8 @@ export class Game {
   // Inlane → lit ramp: ms left on each ramp's doubled value.
   private rampBoostL = 0;
   private rampBoostR = 0;
+  /** Last time a captive strike spotted a CHICAGO letter. */
+  private lastCaptiveSpotAt = -1e9;
 
   // Status report: both flippers held opens the progress panel.
   private statusHoldMs = 0;
@@ -568,10 +571,26 @@ export class Game {
         this.renderer.pushToast('BALL LOCKED', COLOR.INSERT_RED, 900);
         this.sound.lock();
         break;
-      case 'captive':
+      case 'captive': {
         this.renderer.pushToast('CAPTIVE +' + e.points.toLocaleString(), COLOR.NEON_GREEN, 600);
         this.sound.captive();
+        // A solid strike SPOTS the next CHICAGO letter. The drop banks
+        // alone get hit about once a ball, so the headline shot on the
+        // playfield art was unreachable inside a three-ball game.
+        if (this.timeMs - this.lastCaptiveSpotAt >= CAPTIVE_SPOT_MS) {
+          const spot = this.playfield.bank.spotLetter();
+          if (spot) {
+            this.lastCaptiveSpotAt = this.timeMs;
+            this.renderer.pushToast(`SPOTTED  ${spot.letter}`, COLOR.NEON_CYAN, 1200);
+            this.sound.dropTarget();
+            if (spot.completed) {
+              // Same reward path as knocking the last target down.
+              this.handleScore({ kind: 'super-jackpot', points: POINTS.SUPER_JACKPOT });
+            }
+          }
+        }
         break;
+      }
       case 'drop-target':
         if (e.letter) this.renderer.pushToast(e.letter, COLOR.NEON_CYAN, 600);
         this.sound.dropTarget();
@@ -1284,6 +1303,7 @@ export class Game {
     this.hurryUpValue = 0;
     this.rampBoostL = 0;
     this.rampBoostR = 0;
+    this.lastCaptiveSpotAt = -1e9;
     this.expressLit = false;
     this.elFare = 0;
     this.tiltHeat = 0;
