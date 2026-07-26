@@ -21,6 +21,8 @@ import {
   MB_JACKPOTS_FOR_SUPER,
   MB_SUPER_MULT,
   SUPER_SKILL_MS,
+  CHICAGO_SUPER_STEP,
+  STATUS_HOLD_MS,
   SPORT_MODE_MS,
   CROSSTOWN_MS,
   TRAIN_PERIOD_MS,
@@ -51,6 +53,8 @@ interface PlayerState {
   crosstownDone: boolean;
   /** Bonus X carried into this player's next ball (0 = none). */
   heldBonusX: number;
+  /** How many times this player has spelled CHICAGO (escalates the super). */
+  chicagoCompletions: number;
 }
 
 function newPlayer(): PlayerState {
@@ -64,6 +68,7 @@ function newPlayer(): PlayerState {
     sportsDone: SPORTS.map(() => false),
     crosstownDone: false,
     heldBonusX: 0,
+    chicagoCompletions: 0,
   };
 }
 
@@ -195,6 +200,10 @@ export class Game {
   private elFare = 0;
   // Hurry-up finale: >0 while the last shot of a sport mode is pending.
   private hurryUpValue = 0;
+
+  // Status report: both flippers held opens the progress panel.
+  private statusHoldMs = 0;
+  private statusOpen = false;
 
   // End-of-ball bonus ceremony (DMD count-up while BALL_DRAINED).
   private ceremonyTotal = 0;
@@ -426,13 +435,26 @@ export class Game {
     this.checkReplay();
 
     switch (e.kind) {
-      case 'super-jackpot':
-        this.renderer.pushToast('SUPER JACKPOT!', COLOR.NEON_AMBER, 1800);
+      case 'super-jackpot': {
+        // Every re-spell of CHICAGO pays more than the last.
+        this.cur.chicagoCompletions++;
+        const n = this.cur.chicagoCompletions;
+        const extra = (n - 1) * CHICAGO_SUPER_STEP;
+        if (extra > 0) this.score += extra;
+        this.renderer.pushToast(
+          n > 1
+            ? `CHICAGO ×${n} SUPER +${(POINTS.SUPER_JACKPOT + extra).toLocaleString()}`
+            : 'SUPER JACKPOT!',
+          COLOR.NEON_AMBER,
+          1800,
+        );
         this.renderer.triggerJackpotFlash();
         this.renderer.kick(5);
         this.sound.jackpot();
+        this.sound.crowd(1200, 0.2);
         this.spelledChicago = true;
         break;
+      }
       case 'skill-shot':
         this.renderer.pushToast(`SKILL SHOT +${e.points.toLocaleString()}`, COLOR.NEON_AMBER, 1200);
         this.renderer.pushToast('SUPER SKILL AT THE BEAN', COLOR.TEXT_DIM, 1200);
@@ -967,6 +989,19 @@ export class Game {
         }
       }
     }
+    // Status report — hold BOTH flippers to see the full progress panel
+    // (a real machine's instant info). Flippers keep working underneath.
+    if (allowFlippers && this.input.isDown('leftFlipper') && this.input.isDown('rightFlipper')) {
+      this.statusHoldMs += dtMs;
+      if (!this.statusOpen && this.statusHoldMs >= STATUS_HOLD_MS) {
+        this.statusOpen = true;
+        this.sound.rollover();
+      }
+    } else {
+      this.statusHoldMs = 0;
+      this.statusOpen = false;
+    }
+
     if (allowFlippers) {
       // Flipper clack + classic lane change on the press.
       if (this.input.wasPressed('leftFlipper')) {
@@ -1201,6 +1236,12 @@ export class Game {
       kickbackLit: this.kickbackLit,
       mysteryLit: this.mysteryLit,
       expressLit: this.expressLit,
+      statusOpen: this.statusOpen,
+      heldBonusX: this.cur.heldBonusX,
+      elFare: this.elFare,
+      elFareNeeded: EXPRESS_FARE_HITS,
+      chicagoCompletions: this.cur.chicagoCompletions,
+      crosstownDone: this.cur.crosstownDone,
       hurryUpValue: Math.round(this.hurryUpValue),
       comboActive: this.timeMs - this.lastComboAt < COMBO_WINDOW_MS,
       bonusX: this.bonusX,

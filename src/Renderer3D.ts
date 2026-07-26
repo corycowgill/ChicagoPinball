@@ -93,6 +93,23 @@ export class Renderer3D {
   }[] = [];
   private floodlights: THREE.SpotLight[] = [];
 
+  // Impact sparks: a shared pool of tiny emissive motes thrown off by
+  // bumper / sling / drop-target hits. Fade by shrinking (no per-particle
+  // material, so the pool stays cheap).
+  private sparkPool: THREE.Mesh[] = [];
+  private sparks: {
+    mesh: THREE.Mesh;
+    vx: number;
+    vy: number;
+    vz: number;
+    life: number;
+    max: number;
+  }[] = [];
+  private sparkMats = new Map<string, THREE.MeshBasicMaterial>();
+  private prevBumperFlash: number[] = [];
+  private prevSlingFlash: number[] = [];
+  private prevDropHit: boolean[] = [];
+
   // Skyline / train / stadium
   private trainCars: THREE.Group[] = [];
   private trainLight: THREE.PointLight | null = null;
@@ -201,7 +218,64 @@ export class Renderer3D {
     this.sportFx[sportIdx] = type === 'complete' ? 1600 : 900;
   }
 
+  /** Throw a burst of sparks from a playfield point (2D x,z + height). */
+  private spawnSparks(x: number, z: number, y: number, color: string, count: number) {
+    if (this.sparks.length > 90) return; // hard cap protects mobile
+    let mat = this.sparkMats.get(color);
+    if (!mat) {
+      mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(color) });
+      this.sparkMats.set(color, mat);
+    }
+    const n = this.quality === 'mobile' ? Math.ceil(count / 2) : count;
+    for (let i = 0; i < n; i++) {
+      let mesh = this.sparkPool.pop();
+      if (!mesh) {
+        mesh = new THREE.Mesh(new THREE.SphereGeometry(2.2, 6, 4), mat);
+        this.scene.add(mesh);
+      }
+      mesh.material = mat;
+      mesh.visible = true;
+      mesh.scale.setScalar(1);
+      mesh.position.set(x, y, z);
+      const a = Math.random() * Math.PI * 2;
+      const speed = 1.6 + Math.random() * 2.6;
+      const max = 260 + Math.random() * 220;
+      this.sparks.push({
+        mesh,
+        vx: Math.cos(a) * speed,
+        vy: 1.2 + Math.random() * 2.4,
+        vz: Math.sin(a) * speed,
+        life: max,
+        max,
+      });
+    }
+  }
+
+  private tickSparks(dtMs: number) {
+    const f = dtMs / 16.667;
+    for (let i = this.sparks.length - 1; i >= 0; i--) {
+      const p = this.sparks[i];
+      p.life -= dtMs;
+      if (p.life <= 0) {
+        p.mesh.visible = false;
+        this.sparkPool.push(p.mesh);
+        this.sparks.splice(i, 1);
+        continue;
+      }
+      p.vy -= 0.32 * f; // gravity pulls the motes back to the wood
+      p.mesh.position.x += p.vx * f;
+      p.mesh.position.y += p.vy * f;
+      p.mesh.position.z += p.vz * f;
+      if (p.mesh.position.y < 2) {
+        p.mesh.position.y = 2;
+        p.vy *= -0.35;
+      }
+      p.mesh.scale.setScalar(Math.max(0.05, p.life / p.max));
+    }
+  }
+
   tick(dtMs: number) {
+    this.tickSparks(dtMs);
     for (const t of this.toasts) t.ttl -= dtMs;
     this.toasts = this.toasts.filter((t) => t.ttl > 0);
     if (this.flashJackpot > 0) this.flashJackpot -= dtMs;
@@ -1568,20 +1642,39 @@ export class Renderer3D {
       this.captiveMesh.position.set(pf.captive.ball.position.x, 10, pf.captive.ball.position.y);
     }
 
-    // Drop targets sink when hit.
+    // Drop targets sink when hit — and spit chips on the way down.
     pf.bank.targets.forEach((t, i) => {
       this.dropMeshes[i].position.y = t.hit ? -12 : 13;
+      if (t.hit && !this.prevDropHit[i]) {
+        this.spawnSparks(t.home.x, t.home.y, 16, '#9ff2ff', 8);
+      }
+      this.prevDropHit[i] = t.hit;
     });
     // Standups glow while lit.
     pf.standups.forEach((s, i) => {
       this.standupMats[i].emissiveIntensity = s.lit ? 1.4 : 0.25;
     });
-    // Bumper + sling flashes.
+    // Bumper + sling flashes, with a spark burst on the rising edge.
     pf.popBumpers.forEach((b, i) => {
       this.bumperCapMats[i].emissiveIntensity = 0.35 + b.flashLevel * 2.2;
+      if (b.flashLevel > 0.6 && (this.prevBumperFlash[i] ?? 0) <= 0.6) {
+        this.spawnSparks(b.body.position.x, b.body.position.y, 22, '#ffcf7a', 10);
+      }
+      this.prevBumperFlash[i] = b.flashLevel;
     });
     pf.slingshots.forEach((s, i) => {
       this.slingMats[i].emissiveIntensity = s.flashLevel * 1.6;
+      if (s.flashLevel > 0.6 && (this.prevSlingFlash[i] ?? 0) <= 0.6) {
+        const v = s.verts;
+        this.spawnSparks(
+          (v[0].x + v[1].x + v[2].x) / 3,
+          (v[0].y + v[1].y + v[2].y) / 3,
+          24,
+          '#ffe8f0',
+          8,
+        );
+      }
+      this.prevSlingFlash[i] = s.flashLevel;
     });
     if (this.beanMesh) {
       const s = 1 + pf.bean.flashLevel * 0.08;
@@ -2011,6 +2104,10 @@ export class Renderer3D {
       }
     }
 
+    // Instant info — both flippers held. Everything the deep ruleset is
+    // tracking, on one panel, so progress is never a mystery.
+    if (hud.statusOpen) this.drawStatusPanel(ctx, pf, hud);
+
     if (hud.tilted) {
       ctx.shadowColor = COLOR.INSERT_RED;
       ctx.shadowBlur = 26;
@@ -2019,7 +2116,89 @@ export class Renderer3D {
       ctx.fillText('TILT', PLAYFIELD_W / 2, 520);
       ctx.shadowBlur = 0;
     }
-    void pf;
+  }
+
+  /** The status report panel (Stern's "instant info"). */
+  private drawStatusPanel(ctx: CanvasRenderingContext2D, pf: Playfield, hud: HudInfo) {
+    const x0 = 46;
+    const y0 = 250;
+    const w = PLAYFIELD_W - 92;
+    const h = 392;
+    ctx.save();
+    ctx.fillStyle = 'rgba(4, 8, 18, 0.9)';
+    ctx.beginPath();
+    ctx.roundRect(x0, y0, w, h, 10);
+    ctx.fill();
+    ctx.strokeStyle = COLOR.BRASS;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '4px';
+    ctx.fillStyle = COLOR.FLAG_BLUE;
+    ctx.font = 'bold 15px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText('STATUS', PLAYFIELD_W / 2, y0 + 24);
+    (ctx as unknown as { letterSpacing?: string }).letterSpacing = '0px';
+
+    // Sports ladder — the spine of the ruleset.
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 12px "Helvetica Neue", Arial, sans-serif';
+    SPORTS.forEach((s, i) => {
+      const y = y0 + 52 + i * 21;
+      const done = hud.sportsDone[i];
+      const running = hud.activeSport === i;
+      ctx.fillStyle = done ? COLOR.NEON_GREEN : running ? COLOR.NEON_AMBER : COLOR.TEXT_DIM;
+      ctx.fillText(done ? '●' : running ? '◐' : '○', x0 + 16, y);
+      ctx.fillStyle = done ? COLOR.TEXT : running ? COLOR.NEON_AMBER : COLOR.TEXT_DIM;
+      ctx.fillText(s.sport, x0 + 34, y);
+      ctx.fillStyle = COLOR.TEXT_DIM;
+      ctx.font = '10px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText(s.shotName, x0 + 138, y);
+      ctx.font = 'bold 12px "Helvetica Neue", Arial, sans-serif';
+    });
+
+    // Wizard chain state.
+    const doneCount = hud.sportsDone.filter(Boolean).length;
+    let wiz = `SPORTS ${doneCount}/5`;
+    if (hud.bossActive) wiz = 'SHOWDOWN RUNNING';
+    else if (hud.bossLit) wiz = 'SHOWDOWN LIT — SCOOP';
+    else if (hud.crosstownActive) wiz = `CROSSTOWN — ${hud.crosstownLeft.length} LEFT`;
+    else if (doneCount === 5 && !hud.crosstownDone) wiz = 'CROSSTOWN LIT — SCOOP';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = COLOR.INSERT_RED;
+    ctx.fillText(wiz, PLAYFIELD_W / 2, y0 + 176);
+
+    // Two columns of everything else.
+    const rows: Array<[string, string, boolean]> = [
+      ['BONUS', `×${hud.bonusX}${hud.heldBonusX > 0 ? ` · HOLD ×${hud.heldBonusX}` : ''}`, hud.bonusX > 1],
+      ['LOCKS', `${pf.bean.locked}/3`, pf.bean.locked > 0],
+      ['CHICAGO', hud.chicagoCompletions > 0 ? `×${hud.chicagoCompletions}` : '—', hud.chicagoCompletions > 0],
+      ['EL FARE', `${Math.min(hud.elFare, hud.elFareNeeded)}/${hud.elFareNeeded}`, hud.elFare > 0],
+      ['KICKBACK', hud.kickbackLit ? 'LIT' : 'OFF', hud.kickbackLit],
+      ['EL EXPRESS', hud.expressLit ? 'LIT' : 'OFF', hud.expressLit],
+      ['MYSTERY', hud.mysteryLit ? 'LIT' : 'USED', hud.mysteryLit],
+      ['EXTRA BALLS', `${hud.extraBalls}`, hud.extraBalls > 0],
+    ];
+    rows.forEach(([label, value, on], i) => {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const cx = x0 + 18 + col * (w / 2 - 4);
+      const y = y0 + 206 + row * 30;
+      ctx.textAlign = 'left';
+      ctx.fillStyle = COLOR.TEXT_DIM;
+      ctx.font = '10px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText(label, cx, y);
+      ctx.fillStyle = on ? COLOR.NEON_GREEN : COLOR.TEXT_DIM;
+      ctx.font = 'bold 13px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText(value, cx, y + 14);
+    });
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = COLOR.TEXT_DIM;
+    ctx.font = '10px "Helvetica Neue", Arial, sans-serif';
+    ctx.fillText('RELEASE A FLIPPER TO RESUME', PLAYFIELD_W / 2, y0 + h - 16);
+    ctx.restore();
   }
 }
 
