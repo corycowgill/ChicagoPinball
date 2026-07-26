@@ -244,6 +244,23 @@ export class Game {
   }
 
   private resolveTouchKey(x: number, y: number): VirtualKey | null {
+    // While paused: the panel's lower band resumes, the sides are the
+    // volume control. Without this there was NO touch path out of pause.
+    if (this.paused) {
+      if (y > 560 && y < 640 && x > 60 && x < PLAYFIELD_W - 60) return 'pause';
+      return x < PLAYFIELD_W / 2 ? 'leftFlipper' : 'rightFlipper';
+    }
+    // Pause button — top-left corner, over the backbox where no shot
+    // lives, so it can't be hit by a stray flipper tap.
+    if (
+      x < 64 &&
+      y < 170 &&
+      (this.state === GameState.PLAYING ||
+        this.state === GameState.READY ||
+        this.state === GameState.BALL_DRAINED)
+    ) {
+      return 'pause';
+    }
     if (this.state === GameState.GAME_OVER && this.enteringInitials) {
       // Letter entry: side thirds cycle, middle locks the letter in.
       if (x < PLAYFIELD_W / 3) return 'leftFlipper';

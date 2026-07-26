@@ -84,6 +84,8 @@ function sanitize(text: string): string {
 }
 
 export class Dmd {
+  /** Clock driving the marquee scroll of over-long lines. */
+  private scrollMs = 0;
   readonly cols = COLS;
   readonly rows = ROWS;
   private buf = new Uint8Array(COLS * ROWS);
@@ -101,8 +103,10 @@ export class Dmd {
     return sanitize(text).length * 6 - 1;
   }
 
-  /** Draw 5×7 text with the glyph top-left at (x, y) in dot coordinates. */
-  text(str: string, x: number, y: number) {
+  /** Draw 5×7 text with the glyph top-left at (x, y) in dot coordinates.
+   *  `gap` is the inter-glyph spacing (1 normally, 0 when condensing a
+   *  long line to fit). Dots outside the panel are dropped by dot(). */
+  text(str: string, x: number, y: number, gap = 1) {
     const s = sanitize(str);
     let cx = x;
     for (const ch of s) {
@@ -113,12 +117,37 @@ export class Dmd {
           if (bits & (1 << (4 - c))) this.dot(cx + c, y + r);
         }
       }
-      cx += 6;
+      cx += 5 + gap;
     }
   }
 
+  /** Centre a line, condensing then scrolling if it's too wide for the
+   *  panel — a long message used to just run off the right edge and
+   *  vanish (e.g. "SUPER SKILL AT THE BEAN" read "...AT THE BE"). */
   centerText(str: string, y: number) {
-    this.text(str, Math.max(0, Math.floor((COLS - this.textWidth(str)) / 2)), y);
+    const s = sanitize(str);
+    const wide = this.textWidth(s);
+    if (wide <= COLS) {
+      this.text(s, Math.max(0, Math.floor((COLS - wide) / 2)), y);
+      return;
+    }
+    // Condensed: 5px glyphs butted together.
+    const tight = s.length * 5;
+    if (tight <= COLS) {
+      this.text(s, Math.max(0, Math.floor((COLS - tight) / 2)), y, 0);
+      return;
+    }
+    // Still too long — marquee it, with a pause at each end.
+    const overflow = tight - COLS;
+    const cycle = overflow + 44; // 22 dots of dwell at both ends
+    const phase = Math.floor(this.scrollMs / 45) % cycle;
+    const shift = Math.min(overflow, Math.max(0, phase - 22));
+    this.text(s, -shift, y, 0);
+  }
+
+  /** Advance the marquee clock (called once per frame by the renderer). */
+  tick(dtMs: number) {
+    this.scrollMs += dtMs;
   }
 
   rightText(str: string, y: number, rightX = COLS - 2) {
