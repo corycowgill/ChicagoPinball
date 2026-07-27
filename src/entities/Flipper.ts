@@ -40,6 +40,10 @@ export class Flipper {
   private readonly kickStep = FLIPPER_KICK_VEL;
   private readonly returnStep = FLIPPER_RETURN_VEL;
 
+  /** True while the bat is actually rotating. Only a moving bat imparts
+   *  energy; a parked one absorbs it. Updated every tick(). */
+  swinging = false;
+
   /** pivotX/pivotY is the world-space hinge point. */
   constructor(side: FlipperSide, pivotX: number, pivotY: number, opts: FlipperOpts = {}) {
     this.side = side;
@@ -120,7 +124,12 @@ export class Flipper {
     const target = this.active ? this.activeAngle : this.restAngle;
     const speed = this.active ? this.kickStep : this.returnStep;
     const diff = target - this.body.angle;
-    if (Math.abs(diff) < 1e-3) {
+    // A bat that is parked (held up, or sitting at rest) is rubber, not a
+    // paddle: it deadens the ball so gravity can walk it into the crook.
+    // A bat mid-sweep is doing work and must not be damped at all — see
+    // Playfield's flipper contact handlers, which read this.
+    this.swinging = Math.abs(diff) >= 1e-3;
+    if (!this.swinging) {
       // At target — hold still.
       Matter.Body.setAngularVelocity(this.body, 0);
       Matter.Body.setVelocity(this.body, { x: 0, y: 0 });

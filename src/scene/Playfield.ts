@@ -23,6 +23,8 @@ import {
   SCOOP_HOLD_MS,
   PLUNGER_MIN_LAUNCH,
   PLUNGER_LAUNCH_RANGE,
+  FLIPPER_DEAD_BOUNCE,
+  FLIPPER_ROLL_DAMP,
 } from '../constants';
 import { ScoreEvent } from '../types';
 
@@ -403,6 +405,35 @@ export class Playfield {
 
   private wireCollisions() {
     const physics = this.physics;
+
+    // ── Flipper rubber: the cradle ──────────────────────────────────────
+    // Real flipper rubber deadens a ball so it walks down the bat and sits
+    // in the crook, which is how a player traps and aims. Matter combines
+    // restitution with MAX, so the ball's own 0.22 wins no matter what the
+    // bat declares — the rebound has to be taken out after the solver runs.
+    // Only a PARKED bat absorbs; a bat mid-sweep is untouched, so flip
+    // power is exactly what it was.
+    // Split the ball's velocity in the bat's frame and treat the two halves
+    // differently, which is what rubber actually does: it absorbs the
+    // impact but it does not grab. Damping the whole vector instead either
+    // glues the ball to a resting bat or (with a speed floor) preserves
+    // enough of the inbound direction to coast it off the tip.
+    const deaden = (f: Flipper) => (_s: Matter.Body, o: Matter.Body) => {
+      if (o.label !== 'ball' || f.swinging) return;
+      const v = Matter.Body.getVelocity(o);
+      const tx = Math.cos(f.body.angle);
+      const ty = Math.sin(f.body.angle);
+      const vt = v.x * tx + v.y * ty; // along the bat — rolling
+      const vn = -v.x * ty + v.y * tx; // into the bat — the bounce
+      const t = vt * FLIPPER_ROLL_DAMP;
+      const n = vn * FLIPPER_DEAD_BOUNCE;
+      Matter.Body.setVelocity(o, { x: tx * t - ty * n, y: ty * t + tx * n });
+    };
+    for (const f of [this.leftFlipper, this.rightFlipper]) {
+      const label = f.body.label;
+      physics.on(label, deaden(f)); // kill the rebound at impact
+      physics.onActive(label, deaden(f)); // keep it dead while it settles
+    }
 
     physics.on('bean', (_s, o) => {
       if (o.label !== 'ball') return;
