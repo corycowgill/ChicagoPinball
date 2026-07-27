@@ -36,6 +36,18 @@ export const FLIPPER_ACTIVE_ANGLE = -0.42;
 export const FLIPPER_KICK_VEL = 0.2;
 export const FLIPPER_RETURN_VEL = 0.11;
 
+// Flipper rubber, applied to a PARKED bat only (held up, or at rest) — a
+// bat mid-sweep is never damped, so flip power is unchanged. The ball's
+// velocity is split in the bat's frame: the component INTO the bat is the
+// bounce and is mostly absorbed, while the component ALONG the bat is
+// rolling and is only lightly slowed. That split is what lets a held bat
+// cradle (gravity walks the ball down into the crook and holds it) while a
+// resting bat still lets it roll off the tip. Damping the whole vector
+// does neither: uniformly it glues the ball to the bat, and with a speed
+// floor it preserves enough of the inbound direction to coast off the tip.
+export const FLIPPER_DEAD_BOUNCE = 0.28;
+export const FLIPPER_ROLL_DAMP = 0.94;
+
 // Launch speed = PLUNGER_MIN_LAUNCH + pull × PLUNGER_LAUNCH_RANGE (px/step).
 // A weak pull doesn't clear the shooter lane and rolls back to the plunger;
 // the arrival speed at the top of the lane picks the skill-shot lane.
