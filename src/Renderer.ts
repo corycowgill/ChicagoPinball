@@ -92,6 +92,11 @@ export interface HudInfo {
   pfX: number;
   pfXMs: number;
   loopCharge: number;
+  /** Pop bumpers: hits this ball and what the next one is worth. */
+  bumperHits: number;
+  bumperValue: number;
+  /** Tilt warnings already announced (0 = bob is settled). */
+  tiltWarned: number;
   /** Lake Shore Multiball: SUPER lit at the Bean + current jackpot value. */
   mbSuperLit: boolean;
   mbJackpotValue: number;

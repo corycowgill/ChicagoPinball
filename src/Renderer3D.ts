@@ -18,6 +18,8 @@ import {
   LOOPS_FOR_PF_X,
   POINTS,
   SPINNER_STEP,
+  BUMPER_AWARD_HITS,
+  TILT_LIMIT,
   COLOR,
 } from './constants';
 
@@ -2061,8 +2063,15 @@ export class Renderer3D {
       else if (blink) d.centerText(`JACKPOT ${Math.round(hud.mbJackpotValue / 1000)}K`, 10);
     } else if (hud.tilted) {
       if (blink) d.centerText('TILT', 10);
-    } else if (hud.tiltHeat >= 2) {
-      d.centerText('CAREFUL!', 10);
+    } else if (hud.tiltWarned >= 1) {
+      // Show how much rope is left, not just a vague "careful" — nudging is
+      // a skill you are meant to be able to push to the edge deliberately.
+      const left = TILT_LIMIT + 1 - hud.tiltWarned;
+      if (left <= 1) {
+        if (blink) d.centerText('DANGER — NO MORE NUDGES', 10);
+      } else {
+        d.centerText(`TILT WARNING — ${left} LEFT`, 10);
+      }
     } else if (hud.bossLit && hud.state === GameState.PLAYING) {
       if (blink) d.centerText('SHOWDOWN AT THE SCOOP', 10);
     } else if (hud.playerScores.length > 1) {
@@ -2417,6 +2426,11 @@ export class Renderer3D {
         'SPINNER',
         `${(POINTS.SPINNER_REV + SPINNER_STEP * hud.chicagoCompletions).toLocaleString()}/REV`,
         hud.chicagoCompletions > 0,
+      ],
+      [
+        'BUMPERS',
+        `${hud.bumperValue.toLocaleString()} · ${hud.bumperHits % BUMPER_AWARD_HITS}/${BUMPER_AWARD_HITS}`,
+        hud.bumperHits > 0,
       ],
       ['EL FARE', `${Math.min(hud.elFare, hud.elFareNeeded)}/${hud.elFareNeeded}`, hud.elFare > 0],
       ['KICKBACK', hud.kickbackLit ? 'LIT' : 'OFF', hud.kickbackLit],

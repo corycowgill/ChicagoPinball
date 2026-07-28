@@ -42,6 +42,11 @@ import {
   HURRYUP_DECAY_PER_S,
   TILT_LIMIT,
   TILT_DECAY_PER_S,
+  BUMPER_BASE,
+  BUMPER_STEP,
+  BUMPER_MAX,
+  BUMPER_AWARD_HITS,
+  BUMPER_AWARD,
   REPLAY_SCORE,
   MAX_PLAYERS,
 } from './constants';
@@ -157,6 +162,10 @@ export class Game {
   private get spinnerValue(): number {
     return POINTS.SPINNER_REV + SPINNER_STEP * this.cur.chicagoCompletions;
   }
+  /** Current pop-bumper value — climbs with every hit inside the ball. */
+  private get bumperValue(): number {
+    return Math.min(BUMPER_MAX, BUMPER_BASE + BUMPER_STEP * Math.max(0, this.bumperHits - 1));
+  }
   private get score(): number {
     return this.cur.score;
   }
@@ -208,6 +217,12 @@ export class Game {
   // Nudge / tilt
   private tiltHeat = 0;
   private tilted = false;
+  /** Highest whole unit of heat already announced, so each warning fires
+   *  once — and re-arms if the bob cools back down. */
+  private tiltWarned = 0;
+
+  // Pop bumpers: value climbs with every hit inside a ball.
+  private bumperHits = 0;
 
   // Kickback (left outlane) + Mystery (LAKE scoop)
   private kickbackLit = false;
@@ -415,6 +430,24 @@ export class Game {
     if (e.kind === 'spinner') {
       const revs = Math.max(1, Math.round(e.points / POINTS.SPINNER_REV));
       pts = revs * this.spinnerValue;
+    }
+
+    // Pop bumpers climb with every hit in the ball, and every so many hits
+    // pays an award on top. Flat-rate bumpers made the most-hit thing on
+    // the board worth 0.6% of a game.
+    if (e.kind === 'pop-bumper') {
+      this.bumperHits++;
+      pts = this.bumperValue;
+      if (this.bumperHits % BUMPER_AWARD_HITS === 0) {
+        pts += BUMPER_AWARD;
+        this.renderer.pushToast(
+          `BUMPER AWARD +${BUMPER_AWARD.toLocaleString()}`,
+          COLOR.INSERT_AMBER,
+          1600,
+        );
+        this.renderer.triggerJackpotFlash();
+        this.sound.jackpot();
+      }
     }
 
     // Orbits charge the playfield multiplier. At the cap the loops keep
@@ -1157,6 +1190,19 @@ export class Game {
           this.renderer.pushToast('TILT', COLOR.INSERT_RED, 2500);
           this.sound.tilt();
           this.sound.speak('Tilt!', true);
+        } else {
+          // Announce each new unit of heat. Without this the counter was
+          // invisible and the tilt always arrived as a surprise — the one
+          // thing a tilt should never be, since nudging is a skill you are
+          // meant to be able to push right up to the edge.
+          const level = Math.floor(this.tiltHeat);
+          if (level > this.tiltWarned) {
+            this.tiltWarned = level;
+            const last = level >= TILT_LIMIT;
+            this.renderer.pushToast(last ? 'DANGER' : 'TILT WARNING', COLOR.INSERT_RED, 1400);
+            this.sound.tiltWarning(level);
+            if (last) this.sound.speak('Danger!', true);
+          }
         }
       }
     }
@@ -1260,8 +1306,18 @@ export class Game {
       this.bossMsLeft -= dtMs;
       if (this.bossMsLeft <= 0) this.bossFail();
     }
-    // Tilt heat cools off over time.
-    if (this.tiltHeat > 0) this.tiltHeat = Math.max(0, this.tiltHeat - (TILT_DECAY_PER_S * dtMs) / 1000);
+    // Tilt heat cools off over time. Warnings re-arm as it falls, so a
+    // player who waits out the bob hears the count again on the way back up.
+    //
+    // ceil, not floor: heat is exactly N the instant the Nth warning fires
+    // and starts decaying immediately, so flooring cleared the warning
+    // within a frame and the DMD line never stayed up long enough to read.
+    // With ceil a warning survives until the heat has genuinely fallen
+    // through the level below it.
+    if (this.tiltHeat > 0) {
+      this.tiltHeat = Math.max(0, this.tiltHeat - (TILT_DECAY_PER_S * dtMs) / 1000);
+      this.tiltWarned = Math.min(this.tiltWarned, Math.ceil(this.tiltHeat));
+    }
 
     if (this.state === GameState.BALL_DRAINED) {
       // Bonus count-up ticks while the ceremony runs.
@@ -1363,7 +1419,9 @@ export class Game {
     this.expressLit = false;
     this.elFare = 0;
     this.tiltHeat = 0;
+    this.tiltWarned = 0;
     this.tilted = false;
+    this.bumperHits = 0;
     this.kickbackLit = false;
     this.mysteryLit = true; // one free Mystery per ball
     for (const s of this.playfield.standups) s.lit = false;
@@ -1450,6 +1508,9 @@ export class Game {
       pfX: this.pfX,
       pfXMs: this.pfXMs,
       loopCharge: this.loopCharge,
+      bumperHits: this.bumperHits,
+      bumperValue: this.bumperValue,
+      tiltWarned: this.tiltWarned,
       rampBoostL: this.rampBoostL,
       rampBoostR: this.rampBoostR,
       mbSuperLit: this.mbSuperLit,
@@ -1490,7 +1551,9 @@ export class Game {
     this.elFare = 0;
     this.lastTrainCycle = -1;
     this.tiltHeat = 0;
+    this.tiltWarned = 0;
     this.tilted = false;
+    this.bumperHits = 0;
     this.kickbackLit = false;
     this.mysteryLit = true;
     this.multiballActive = false;
