@@ -826,22 +826,33 @@ export class Playfield {
       { x: this.playRight - 172, y: 558, r: 4 },
     );
 
-    // ── STADIUM STANDOFFS — the raised arena over the flag banner stands on
-    //    four real posts, so the ball bounces off what it sees. They sit in
-    //    the open bounce area between the ramp mouths and the slingshots,
-    //    clear of every named shot lane. ──
-    for (const [px, py] of [
-      [209, 570],
-      [331, 570],
-      [209, 630],
-      [331, 630],
-    ]) {
-      const post = Matter.Bodies.circle(px, py, 5, {
+    // ── STADIUM PEDESTAL — the raised arena stands on ONE central column.
+    //
+    //    It used to stand on four posts at x 209/331, y 570/630 — a footprint
+    //    inherited from a stadium drawn around the CABINET centre (270)
+    //    rather than the PLAY-AREA centre (240). Measured against every
+    //    flipper-to-target line, those four posts blocked FIVE shots:
+    //      left -> captive      2.6 px    left -> ramp:R   7.9 px
+    //      right -> bean        6.1 px    left -> orbit:R  9.2 px
+    //      right -> lake scoop  9.5 px
+    //    (a ball needs > 16 px of clearance to pass a 5 px post). That is
+    //    the whole reason the make-rate sweep found captive and orbit:R
+    //    completely dead and every other shot down to a 1-in-25 window: the
+    //    centre of the lower playfield is where all the shot lines converge,
+    //    so there is no arrangement of four posts there that stays clear —
+    //    the best a search could find was 14.9 px, still a graze.
+    //
+    //    One column on the centreline is the way out. Every shot line passes
+    //    to one side of the board's midpoint, so a 12 px pedestal at
+    //    (240,600) clears the tightest line (ramp cross-shots) by 33.5 px
+    //    and the rest by 40-90 px. ──
+    {
+      const pedestal = Matter.Bodies.circle(this.playCenter, 600, 12, {
         isStatic: true,
         label: 'wall',
         restitution: 0.5,
       });
-      this.addWall(post, 'rail');
+      this.addWall(pedestal, 'rail');
     }
 
     // ── ATTRACTION SUPPORTS — the raised sports panels and the soccer goal
