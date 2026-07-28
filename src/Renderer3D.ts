@@ -386,7 +386,7 @@ export class Renderer3D {
     this.buildCabinet();
     this.buildBackbox();
     this.buildSkyline();
-    this.buildStadium();
+    this.buildStadium(pf);
     this.buildWallsAndPosts(pf);
     this.buildToys(pf);
     this.buildRampsAndWireforms(pf);
@@ -647,17 +647,26 @@ export class Renderer3D {
   /** Raised arena over the flag banner: an oval grandstand ring on chrome
    *  standoffs (with matching physics posts), red/white/blue chase lights
    *  and one lit banner per completed sport. */
-  private buildStadium() {
-    const cx = PLAYFIELD_W / 2;
+  private buildStadium(pf: Playfield) {
+    // Centre on the PLAY AREA, not the cabinet. PLAYFIELD_W/2 is 270, but
+    // the shooter lane owns the last 60 px, so the playfield centreline —
+    // the one the flippers straddle — is 240. Built at 270 the stadium sat
+    // 30 px right of centre and its footprint covered the right ramp mouth
+    // at (330,560). (The apron already does this correction.)
+    const cx = pf.playCenter;
     const cz = 600;
     const group = new THREE.Group();
 
     // Grandstand tiers — two squashed tori.
     const tierMat = new THREE.MeshStandardMaterial({ color: 0x46587a, roughness: 0.5 });
+    // Raised a tier: the arena now stands on a single central pedestal
+    // rather than four legs, so the ball rolls UNDER the ring. The old
+    // lower tier's underside sat at ~21.5, level with the top of a ball
+    // (radius 11 on the floor) — it read as resting on the playfield.
     const rim = new THREE.Mesh(new THREE.TorusGeometry(86, 7, 12, 48), tierMat);
     rim.rotation.x = -Math.PI / 2;
     rim.scale.set(1, 0.5, 1);
-    rim.position.set(cx, 34, cz);
+    rim.position.set(cx, 42, cz);
     group.add(rim);
     const lower = new THREE.Mesh(
       new THREE.TorusGeometry(80, 9, 12, 48),
@@ -665,8 +674,16 @@ export class Renderer3D {
     );
     lower.rotation.x = -Math.PI / 2;
     lower.scale.set(1, 0.5, 1);
-    lower.position.set(cx, 26, cz);
+    lower.position.set(cx, 34, cz);
     group.add(lower);
+
+    // The pedestal itself — matches the 12 px collider in Playfield.
+    const column = new THREE.Mesh(
+      new THREE.CylinderGeometry(12, 15, 34, 16),
+      new THREE.MeshStandardMaterial({ color: 0x35455f, roughness: 0.5, metalness: 0.3 }),
+    );
+    column.position.set(cx, 17, cz);
+    group.add(column);
 
     // Chase lights around the rim.
     for (let i = 0; i < 12; i++) {
@@ -677,7 +694,7 @@ export class Renderer3D {
         emissiveIntensity: 0.25,
       });
       const bulb = new THREE.Mesh(new THREE.SphereGeometry(3.6, 10, 8), mat);
-      bulb.position.set(cx + Math.cos(a) * 86, 40, cz + Math.sin(a) * 43);
+      bulb.position.set(cx + Math.cos(a) * 86, 48, cz + Math.sin(a) * 43);
       this.stadiumChase.push(mat);
       group.add(bulb);
     }
@@ -694,25 +711,17 @@ export class Renderer3D {
       const banner = new THREE.Mesh(new THREE.BoxGeometry(20, 8, 2.4), mat);
       const bx = cx + Math.cos(a) * 88;
       const bz = cz + Math.sin(a) * 45;
-      banner.position.set(bx, 31, bz);
+      banner.position.set(bx, 39, bz);
       banner.lookAt(cx, 96, cz);
       this.stadiumBanners.push(mat);
       group.add(banner);
     });
 
-    // Chrome standoffs — the same coordinates carry physics posts in the
-    // Playfield, so the ball collides with what it sees.
-    for (const [px, pz] of [
-      [209, 570],
-      [331, 570],
-      [209, 630],
-      [331, 630],
-    ]) {
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 5.5, 34, 12), this.chromeMat);
-      leg.position.set(px, 17, pz);
-      leg.castShadow = true;
-      group.add(leg);
-    }
+    // The four chrome standoffs that used to stand here are gone: they were
+    // the single worst obstruction on the board, blocking five shot lines
+    // (see the pedestal comment in Playfield). The central column above is
+    // the only support now, and it carries the matching physics body — so
+    // the ball still collides with exactly what it sees.
     this.scene.add(group);
   }
 
@@ -1488,9 +1497,10 @@ export class Renderer3D {
     };
     pf.rollovers.forEach((r, i) => lamp(r.x, r.y, 8, '#5cff9a', { t: 'rollover', i }));
     // CHICAGO letter inserts above the stadium — 22 px spacing keeps the
-    // end lamps clear of both ramp-mouth funnel rails.
+    // end lamps clear of both ramp-mouth funnel rails. Centred on the play
+    // area (240), not the cabinet (270), like everything else on the board.
     for (let i = 0; i < CHICAGO.length; i++) {
-      lamp(PLAYFIELD_W / 2 - ((CHICAGO.length - 1) * 22) / 2 + i * 22, 528, 8, '#e6293e', {
+      lamp(pf.playCenter - ((CHICAGO.length - 1) * 22) / 2 + i * 22, 528, 8, '#e6293e', {
         t: 'chicago',
         i,
       });
