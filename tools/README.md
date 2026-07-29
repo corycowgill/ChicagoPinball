@@ -4,12 +4,25 @@ Headless Playwright probes that measure how the machine actually plays. They
 drive the real game through `window.__pinball` and read what it scores, so
 they answer questions the code alone cannot.
 
-Run the dev server first, then a probe:
+## Prerequisites
+
+Playwright is **not** a dependency of the game — it would drag a browser
+download into every `npm install` for something only used to measure the
+board. Install it where you run the probes:
+
+```
+npm install --no-save playwright
+```
+
+Then start the dev server on the port the probes expect (5199) and run one:
 
 ```
 npm run dev -- --port 5199
 node tools/makerate.mjs
 ```
+
+If you have a Chromium already on disk, point the probes at it by editing
+the `executablePath` in each file; they default to `/opt/pw-browsers/chromium`.
 
 ## makerate.mjs — is a shot actually makeable?
 
