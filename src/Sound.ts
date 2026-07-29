@@ -311,6 +311,14 @@ export class Sound {
     this.noise(70, { vol: 0.4, freq: 240, q: 0.7 });
   }
 
+  /** One warning chirp per unit of tilt heat — rises in pitch as the bob
+   *  gets closer, so you can hear how much rope is left. */
+  tiltWarning(level: number) {
+    const f = 300 + level * 110;
+    this.tone(f, 130, { type: 'square', vol: 0.26 });
+    this.tone(f, 130, { type: 'square', vol: 0.22, delayMs: 170 });
+  }
+
   tilt() {
     this.tone(220, 500, { type: 'sawtooth', vol: 0.35, slideTo: 210 });
     this.tone(233, 500, { type: 'sawtooth', vol: 0.35 });

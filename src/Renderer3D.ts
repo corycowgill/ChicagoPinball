@@ -18,6 +18,8 @@ import {
   LOOPS_FOR_PF_X,
   POINTS,
   SPINNER_STEP,
+  BUMPER_AWARD_HITS,
+  TILT_LIMIT,
   COLOR,
 } from './constants';
 
@@ -63,6 +65,9 @@ export class Renderer3D {
   private shakeMs = 0;
   private shakeAmp = 0;
   private flashJackpot = 0;
+  /** Backbox: the marquee is a lit panel, and the speaker rings chase. */
+  private marqueeMat: THREE.MeshStandardMaterial | null = null;
+  private speakerLamps: THREE.MeshStandardMaterial[] = [];
 
   private built = false;
   private ballMeshes = new Map<Matter.Body, THREE.Mesh>();
@@ -451,13 +456,59 @@ export class Renderer3D {
     this.paintMarquee(marqueeCanvas.getContext('2d')!);
     const marqueeTex = new THREE.CanvasTexture(marqueeCanvas);
     marqueeTex.colorSpace = THREE.SRGBColorSpace;
+    // Backlit, not flat art. A real marquee is a lit panel and it reacts —
+    // it burns on a jackpot and breathes during attract. MeshBasic ignores
+    // light entirely, so the whole backbox read as a printed sticker.
+    this.marqueeMat = new THREE.MeshStandardMaterial({
+      map: marqueeTex,
+      emissiveMap: marqueeTex,
+      emissive: 0xffffff,
+      emissiveIntensity: 0.85,
+      roughness: 0.55,
+    });
     const marquee = new THREE.Mesh(
       new THREE.PlaneGeometry(PLAYFIELD_W + 40, 132),
-      new THREE.MeshBasicMaterial({ map: marqueeTex }),
+      this.marqueeMat,
     );
     // Top edge stays inside the camera frustum (~y 205 at this depth).
     marquee.position.set(PLAYFIELD_W / 2, 136, 44.5);
     this.scene.add(marquee);
+
+    // Speaker grilles either side of the DMD — every real backbox has them,
+    // and they give the panel some depth instead of one flat face.
+    for (const sx of [-1, 1]) {
+      const grille = new THREE.Mesh(
+        new THREE.CylinderGeometry(30, 30, 5, 24),
+        new THREE.MeshStandardMaterial({ color: 0x14181f, roughness: 0.85, metalness: 0.25 }),
+      );
+      grille.rotation.x = Math.PI / 2;
+      grille.position.set(PLAYFIELD_W / 2 + sx * 218, 52, 45);
+      this.scene.add(grille);
+      const cone = new THREE.Mesh(
+        new THREE.CylinderGeometry(11, 17, 4, 20),
+        new THREE.MeshStandardMaterial({ color: 0x2a3140, roughness: 0.7 }),
+      );
+      cone.rotation.x = Math.PI / 2;
+      cone.position.set(PLAYFIELD_W / 2 + sx * 218, 52, 47.6);
+      this.scene.add(cone);
+      // Ring of lamps around each speaker, chasing with the music.
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const mat = new THREE.MeshStandardMaterial({
+          color: 0x1a2130,
+          emissive: new THREE.Color(i % 2 ? COLOR.FLAG_RED : COLOR.FLAG_BLUE),
+          emissiveIntensity: 0.2,
+        });
+        const bulb = new THREE.Mesh(new THREE.SphereGeometry(3.2, 8, 6), mat);
+        bulb.position.set(
+          PLAYFIELD_W / 2 + sx * 218 + Math.cos(a) * 38,
+          52 + Math.sin(a) * 38,
+          46,
+        );
+        this.speakerLamps.push(mat);
+        this.scene.add(bulb);
+      }
+    }
 
     // Speaker-panel wedge carrying the DMD, in front of the skyline.
     const wedge = new THREE.Mesh(
@@ -1787,6 +1838,7 @@ export class Renderer3D {
       this.beanMat.emissiveIntensity = hot ? 0.25 + 0.35 * Math.abs(Math.sin(now / 130)) : 0;
     }
 
+    this.animateBackbox(hud, now);
     this.animateTrain(hud);
     this.animateStadium(hud, now);
     this.animateSports(now);
@@ -1892,6 +1944,38 @@ export class Renderer3D {
         const p = this.trainCurve!.getPoint(hud.trainPhase);
         this.trainLight.position.set(p.x, p.y - 6, p.z + 6);
       }
+    }
+  }
+
+  /** Backbox: the marquee is backlit and reacts, and the speaker rings
+   *  chase. A static panel made the whole head of the machine read as a
+   *  printed sticker — the one part of a real cabinet that is never still. */
+  private animateBackbox(hud: HudInfo, now: number) {
+    if (this.marqueeMat) {
+      let e = 0.85;
+      if (hud.state === GameState.TITLE) {
+        // Attract: a slow breath, so an idle machine still looks alive.
+        e = 0.6 + 0.5 * Math.abs(Math.sin(now / 900));
+      } else if (this.flashJackpot > 0) {
+        e = 1.5 + 0.9 * Math.abs(Math.sin(now / 60));
+      } else if (hud.tilted) {
+        e = 0.18; // the head goes dark on a tilt
+      } else if (hud.multiball || hud.bossActive) {
+        e = 1.0 + 0.35 * Math.abs(Math.sin(now / 220));
+      }
+      this.marqueeMat.emissiveIntensity = e;
+    }
+    const n = this.speakerLamps.length;
+    if (!n) return;
+    const perSide = n / 2;
+    // Chase speed follows the action: idle drift, quick under a mode, and
+    // a hard strobe on a jackpot.
+    const speed = this.flashJackpot > 0 ? 90 : hud.multiball || hud.bossActive ? 150 : 320;
+    for (let i = 0; i < n; i++) {
+      const idx = i % perSide;
+      const phase = now / speed - idx * 0.8;
+      const on = hud.tilted ? 0.05 : 0.15 + 0.85 * Math.max(0, Math.sin(phase));
+      this.speakerLamps[i].emissiveIntensity = on;
     }
   }
 
@@ -2061,8 +2145,15 @@ export class Renderer3D {
       else if (blink) d.centerText(`JACKPOT ${Math.round(hud.mbJackpotValue / 1000)}K`, 10);
     } else if (hud.tilted) {
       if (blink) d.centerText('TILT', 10);
-    } else if (hud.tiltHeat >= 2) {
-      d.centerText('CAREFUL!', 10);
+    } else if (hud.tiltWarned >= 1) {
+      // Show how much rope is left, not just a vague "careful" — nudging is
+      // a skill you are meant to be able to push to the edge deliberately.
+      const left = TILT_LIMIT + 1 - hud.tiltWarned;
+      if (left <= 1) {
+        if (blink) d.centerText('DANGER — NO MORE NUDGES', 10);
+      } else {
+        d.centerText(`TILT WARNING — ${left} LEFT`, 10);
+      }
     } else if (hud.bossLit && hud.state === GameState.PLAYING) {
       if (blink) d.centerText('SHOWDOWN AT THE SCOOP', 10);
     } else if (hud.playerScores.length > 1) {
@@ -2417,6 +2508,11 @@ export class Renderer3D {
         'SPINNER',
         `${(POINTS.SPINNER_REV + SPINNER_STEP * hud.chicagoCompletions).toLocaleString()}/REV`,
         hud.chicagoCompletions > 0,
+      ],
+      [
+        'BUMPERS',
+        `${hud.bumperValue.toLocaleString()} · ${hud.bumperHits % BUMPER_AWARD_HITS}/${BUMPER_AWARD_HITS}`,
+        hud.bumperHits > 0,
       ],
       ['EL FARE', `${Math.min(hud.elFare, hud.elFareNeeded)}/${hud.elFareNeeded}`, hud.elFare > 0],
       ['KICKBACK', hud.kickbackLit ? 'LIT' : 'OFF', hud.kickbackLit],

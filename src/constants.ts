@@ -29,6 +29,13 @@ export const FLIPPER_LEN = 98;
 // Bat thickness must always exceed BALL_MAX_SPEED — see above.
 export const FLIPPER_HEIGHT = 28;
 export const FLIPPER_REST_ANGLE = 0.46;
+// 0.88 rad of sweep (50 deg). A wider sweep looks like free aim range — the
+// ball leaves along the bat's normal, so the span of angles a flipper can
+// produce IS its sweep — but -0.52 (56 deg) was measured and REJECTED:
+// total makes across a 25-point strike sweep fell 21 -> 18 and it killed
+// the bean and the lock outright (2 -> 0 each from the right flipper), because
+// swinging further past vertical throws the late-contact shots left of every
+// target on that side. It also left a ball balanced on the resting bat tip.
 export const FLIPPER_ACTIVE_ANGLE = -0.42;
 // Per-frame radian increments — see Flipper.ts. Tuned so the tip sweeps at
 // 0.20 × 98 = 19.6 px/frame, fast enough to send a ball near the speed cap
@@ -85,8 +92,23 @@ export const HURRYUP_DECAY_PER_S = 1600;
 
 // Nudge / tilt: each nudge adds 1 heat; heat decays per second; exceeding
 // the limit tilts — flippers dead and bonus forfeited for the ball.
+//
+// Crossing each whole unit of heat is a WARNING, announced on its own the
+// way a real machine does ("WARNING… DANGER…"). The counter existed before
+// but nothing told the player where they stood, so the tilt always landed
+// as a surprise — the one thing a tilt should never be.
 export const TILT_LIMIT = 3;
 export const TILT_DECAY_PER_S = 0.35;
+
+// Pop bumpers. A flat 100 made the nest 0.6% of a game's points despite
+// being the most-hit thing on the board (1.5 hits a ball). The value now
+// climbs with every hit inside a ball, and each BUMPER_AWARD_HITS hits
+// pays a bonus on top, so a long rattle in the nest is worth something.
+export const BUMPER_BASE = 100;
+export const BUMPER_STEP = 25;
+export const BUMPER_MAX = 2500;
+export const BUMPER_AWARD_HITS = 15;
+export const BUMPER_AWARD = 25000;
 
 // Ball save: a drain within this window after launch serves a fresh ball
 // instead of costing one (once per launch).
