@@ -29,6 +29,13 @@ export const FLIPPER_LEN = 98;
 // Bat thickness must always exceed BALL_MAX_SPEED — see above.
 export const FLIPPER_HEIGHT = 28;
 export const FLIPPER_REST_ANGLE = 0.46;
+// 0.88 rad of sweep (50 deg). A wider sweep looks like free aim range — the
+// ball leaves along the bat's normal, so the span of angles a flipper can
+// produce IS its sweep — but -0.52 (56 deg) was measured and REJECTED:
+// total makes across a 25-point strike sweep fell 21 -> 18 and it killed
+// the bean and the lock outright (2 -> 0 each from the right flipper), because
+// swinging further past vertical throws the late-contact shots left of every
+// target on that side. It also left a ball balanced on the resting bat tip.
 export const FLIPPER_ACTIVE_ANGLE = -0.42;
 // Per-frame radian increments — see Flipper.ts. Tuned so the tip sweeps at
 // 0.20 × 98 = 19.6 px/frame, fast enough to send a ball near the speed cap
