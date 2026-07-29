@@ -43,15 +43,36 @@ const MAJOR = ['ramp:L', 'ramp:R', 'loop:L', 'loop:R', 'scoop', 'captive', 'lake
 async function sweep(side) {
   const key = side === 'left' ? 'z' : '/';
   const made = Object.fromEntries(MAJOR.map((k) => [k, 0]));
+  let voided = 0;
   for (let i = 0; i < N; i++) {
     const frac = 0.3 + (0.68 * i) / (N - 1);
-    await page.evaluate(
-      ({ side, frac }) => {
+    const placed = await page.evaluate(
+      async ({ side, frac }) => {
         const g = window.__pinball;
         const pf = g.playfield;
         const f = side === 'left' ? pf.leftFlipper : pf.rightFlipper;
-        const b = pf.balls[0];
-        if (!b) return;
+        // A ball held in a scoop or riding a ramp IGNORES setPosition — the
+        // scoop re-pins it every frame — so the trial silently voids and
+        // scores nothing. That was the single biggest source of run-to-run
+        // noise: whether a trial ran at all depended on where the PREVIOUS
+        // shot happened to end. Wait for the ball to be free, and cut a
+        // scoop's hold short if it is sitting on one.
+        const free = () => {
+          const b = pf.balls[0];
+          if (!b || b.body.$transit || b.body.isStatic) return null;
+          for (const sc of [pf.lakeMichiganScoop, pf.cityTourScoop]) {
+            if (sc.captured === b.body) {
+              sc.captureTimer = 1e6; // force the eject on the next tick
+              return null;
+            }
+          }
+          return b;
+        };
+        let b = null;
+        for (let t = 0; t < 40 && !(b = free()); t++) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        if (!b) return false;
         const a = f.restAngle;
         const d = f.len * frac;
         let nx = -Math.sin(a);
@@ -75,9 +96,14 @@ async function sweep(side) {
           window.__hits.push(e.kind + (e.letter ? ':' + e.letter : ''));
           g.__origScore(e);
         };
+        return true;
       },
       { side, frac },
     );
+    if (!placed) {
+      voided++;
+      continue;
+    }
     await page.waitForTimeout(45);
     await page.keyboard.down(key);
     await page.waitForTimeout(90);
@@ -97,6 +123,7 @@ async function sweep(side) {
     });
     await page.waitForTimeout(50);
   }
+  if (voided) console.log(`    (${voided}/${N} ${side} trials voided: ball never came free)`);
   return made;
 }
 
