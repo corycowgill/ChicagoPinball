@@ -78,7 +78,20 @@ export function railBody(a: Pt, b: Pt, thickness: number): Matter.Body {
   });
 }
 
-export function buildPlayfield(physics: Physics, resolved: ResolvedLayout): PlayfieldParts {
+/** Optional build-time observer. The editor needs to know which bodies came
+ *  from which descriptor so a click can select the thing under it; nothing
+ *  else does, and the game must not pay for it. Passing no tracer keeps the
+ *  build byte-for-byte what it was — the determinism oracles check exactly
+ *  that. */
+export interface BuildTrace {
+  (id: string, bodies: Matter.Body[]): void;
+}
+
+export function buildPlayfield(
+  physics: Physics,
+  resolved: ResolvedLayout,
+  trace?: BuildTrace,
+): PlayfieldParts {
   const { frame, layout } = resolved;
   const walls: WallDef[] = [];
   const postPositions: { x: number; y: number; r?: number }[] = [];
@@ -88,8 +101,20 @@ export function buildPlayfield(physics: Physics, resolved: ResolvedLayout): Play
     walls.push({ body, outline: polyOf(body), kind });
   };
 
+  // Bodies added while building one descriptor, handed to the tracer after it.
+  // O(n) per item and therefore O(n^2) overall, which is fine for an editor
+  // and never runs in the game.
+  let mark = 0;
+  const beginItem = () => {
+    if (trace) mark = Matter.Composite.allBodies(physics.world).length;
+  };
+  const endItem = (id: string) => {
+    if (trace) trace(id, Matter.Composite.allBodies(physics.world).slice(mark));
+  };
+
   // ── Statics, in order ────────────────────────────────────────────────────
   for (const s of layout.statics as StaticDesc[]) {
+    beginItem();
     switch (s.kind) {
       case 'cabinet-wall': {
         // Deliberately NOT addWall: the outer box is pushed with an empty
@@ -128,6 +153,7 @@ export function buildPlayfield(physics: Physics, resolved: ResolvedLayout): Play
         );
         break;
     }
+    endItem(s.id);
   }
 
   // ── Elements, in order ───────────────────────────────────────────────────
@@ -140,6 +166,7 @@ export function buildPlayfield(physics: Physics, resolved: ResolvedLayout): Play
   };
 
   for (const e of layout.elements) {
+    beginItem();
     switch (e.kind) {
       case 'plunger': {
         const p = new Plunger(frame.launchX, e.y, frame.plungerWidth);
@@ -269,6 +296,7 @@ export function buildPlayfield(physics: Physics, resolved: ResolvedLayout): Play
         break;
       }
     }
+    endItem(e.id);
   }
 
   return { ...(parts as PlayfieldParts), walls, postPositions };

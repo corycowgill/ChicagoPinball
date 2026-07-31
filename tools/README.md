@@ -1,6 +1,26 @@
 # Tools
 
-Two families, and the difference matters.
+## The layout builder
+
+The board is data (`src/layout/default.ts`), and there is a drag-and-drop
+editor for it in the game itself: the **BUILD LAYOUT** button top-right, or
+`?edit` in the URL.
+
+- drag anything; handles resize circles, bend polylines and aim rails
+- the palette adds posts, rails, bumpers, targets, scoops, spinners, sensors
+- the rules from `src/layout/validate.ts` run on every edit and list what they
+  find; clicking a diagnostic selects the offender
+- **Play this board** saves to `localStorage` and reloads into the game
+- **Export JSON** / **Coordinates** get the board back out
+- `?stock` plays the shipped board without clearing what you saved
+
+The editor draws the *real* bodies — it builds the world through
+`buildPlayfield` on every change — so what you see is what the ball collides
+with, not a sketch of it.
+
+---
+
+Two families of checks, and the difference matters.
 
 **Deterministic checks** (`verify.sh`, `layoutdiff`, `validate`, `rulecheck`,
 `ejectaudit`) run headless under Node with no browser and no randomness. Run

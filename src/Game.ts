@@ -5,6 +5,8 @@ import { HudInfo } from './Renderer';
 import { InputManager, VirtualKey } from './InputManager';
 import { Sound } from './Sound';
 import { GameState, ScoreEvent, SPORTS, SportId } from './types';
+import { DEFAULT_LAYOUT } from './layout/default';
+import { PlayfieldLayout } from './layout/types';
 import {
   STARTING_BALLS,
   COLOR,
@@ -271,7 +273,14 @@ export class Game {
   private bossHp = BOSS_HP;
   private bossMsLeft = 0;
 
-  constructor(private renderer: GameRenderer, canvas?: HTMLElement) {
+  constructor(
+    private renderer: GameRenderer,
+    canvas?: HTMLElement,
+    /** The board to play. Defaults to the shipped one; the layout builder
+     *  passes an edited board here, which is the whole point of the board
+     *  being data. */
+    private layout: PlayfieldLayout = DEFAULT_LAYOUT,
+  ) {
     this.rebuildWorld();
     if (canvas) {
       this.input.attachPointer(canvas, (x, y) => this.resolveTouchKey(x, y));
@@ -324,7 +333,7 @@ export class Game {
       onLanesComplete: () => this.advanceBonusX(),
       onLeftOutlane: (ball) => this.handleLeftOutlane(ball),
       onRightOutlane: (ball) => this.handleRightOutlane(ball),
-    });
+    }, this.layout);
   }
 
   private handleLeftOutlane(ball: Matter.Body) {
