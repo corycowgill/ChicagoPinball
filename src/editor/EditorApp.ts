@@ -25,7 +25,14 @@ import { PLAYFIELD_H, PLAYFIELD_W } from '../constants';
 import { DEFAULT_LAYOUT } from '../layout/default';
 import { findDesc, Handle, moveHandle, snap } from '../layout/handles';
 import { PALETTE, requiredReason, uniqueId } from '../layout/palette';
-import { cloneLayout, loadFromStorage, saveToStorage, serialize, parseLayoutFile } from '../layout/storage';
+import {
+  checksumComplaint,
+  cloneLayout,
+  loadFromStorage,
+  parseLayoutFile,
+  saveToStorage,
+  serialize,
+} from '../layout/storage';
 import { PlayfieldLayout, Pt } from '../layout/types';
 import { EditorScene, pickHandle, pickItem, tryBuildScene } from './scene';
 import { drawEditor, toBoard } from './view';
@@ -573,7 +580,10 @@ export class EditorApp {
     this.layout = r.layout;
     this.selected = null;
     this.refresh();
-    this.status(`imported '${r.name}'`);
+    // A checksum mismatch means the file was edited after it was saved, which
+    // is a legitimate thing to have done. Say so and load it anyway.
+    const complaint = checksumComplaint(r);
+    this.status(complaint ? `imported '${r.name}' — ${complaint}` : `imported '${r.name}'`, !!complaint);
   }
 
   /** The developer view: every placed coordinate, in build order, ready to

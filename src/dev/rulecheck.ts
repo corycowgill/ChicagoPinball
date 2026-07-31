@@ -14,6 +14,7 @@
 import { DEFAULT_LAYOUT } from '../layout/default';
 import { resolveLayout } from '../layout/resolve';
 import { validateLayout } from '../layout/validate';
+import { validateRules } from '../layout/feasible';
 import { ElementDesc, PlayfieldLayout, StaticDesc } from '../layout/types';
 
 type Mutate = (l: PlayfieldLayout) => PlayfieldLayout;
@@ -133,6 +134,33 @@ export const CASES: RuleCase[] = [
     }),
   },
   {
+    rule: 'mode-unreachable',
+    what: 'delete the left ramp — BASEBALL starts on it and nothing else does',
+    mutate: (l) => {
+      const c = clone(l);
+      c.elements = c.elements.filter((e) => !(e.kind === 'ramp' && e.label === 'left-ramp'));
+      return c;
+    },
+  },
+  {
+    rule: 'wizard-unreachable',
+    what: 'delete the right-loop sensor — HOCKEY dies, and the wizard with it',
+    mutate: (l) => {
+      const c = clone(l);
+      c.elements = c.elements.filter((e) => !(e.kind === 'sensor' && e.role === 'right-loop'));
+      return c;
+    },
+  },
+  {
+    rule: 'feature-unreachable',
+    what: 'delete the rollover lanes — Bonus X can never advance past 1x',
+    mutate: (l) => {
+      const c = clone(l);
+      c.elements = c.elements.filter((e) => e.kind !== 'rollover');
+      return c;
+    },
+  },
+  {
     rule: 'kicker-placement',
     what: 'the left-outlane kicker pushed off the left edge of the board',
     mutate: mapElement('left-outlane', (e) => {
@@ -152,7 +180,11 @@ export interface CaseResult {
 
 export function runRuleChecks(): CaseResult[] {
   return CASES.map((c) => {
-    const got = validateLayout(resolveLayout(c.mutate(DEFAULT_LAYOUT))).map((d) => d.rule);
+    const mutated = c.mutate(DEFAULT_LAYOUT);
+    const got = [
+      ...validateLayout(resolveLayout(mutated)),
+      ...validateRules(mutated),
+    ].map((d) => d.rule);
     return { rule: c.rule, what: c.what, fired: got.includes(c.rule), got: [...new Set(got)] };
   });
 }
@@ -160,5 +192,8 @@ export function runRuleChecks(): CaseResult[] {
 /** The control: the shipped board must still be clean. Without this, a rule
  *  that fires on everything would pass every case above. */
 export function baselineClean(): string[] {
-  return validateLayout(resolveLayout(DEFAULT_LAYOUT)).map((d) => d.rule);
+  return [
+    ...validateLayout(resolveLayout(DEFAULT_LAYOUT)),
+    ...validateRules(DEFAULT_LAYOUT),
+  ].map((d) => d.rule);
 }

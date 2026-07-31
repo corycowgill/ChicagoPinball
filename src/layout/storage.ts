@@ -20,11 +20,29 @@ export interface LayoutFile {
   format: number;
   name: string;
   savedAt: string;
+  /** FNV-1a over the layout's canonical JSON. Not security — a layout file is
+   *  the user's own data and there is nothing to defend against. It catches
+   *  the boring failure: a file truncated by a copy-paste, or hand-edited into
+   *  something the author no longer remembers changing. Mismatches WARN and
+   *  load anyway, because hand-editing a layout is a legitimate thing to do. */
+  checksum?: string;
   layout: PlayfieldLayout;
 }
 
+/** FNV-1a, the same hash the determinism oracles use — stable across engines
+ *  and dependency-free. */
+export function checksumOf(layout: PlayfieldLayout): string {
+  const s = JSON.stringify(layout);
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    hash ^= s.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
 export function toFile(layout: PlayfieldLayout, name: string, savedAt: string): LayoutFile {
-  return { format: LAYOUT_FORMAT, name, savedAt, layout };
+  return { format: LAYOUT_FORMAT, name, savedAt, checksum: checksumOf(layout), layout };
 }
 
 export function serialize(layout: PlayfieldLayout, name: string, savedAt: string): string {
@@ -49,7 +67,23 @@ export function parseLayoutFile(text: string): LayoutFile | string {
   if (!l || !l.frame || !Array.isArray(l.statics) || !Array.isArray(l.elements)) {
     return 'missing frame / statics / elements';
   }
-  return { format: f.format, name: f.name ?? 'untitled', savedAt: f.savedAt ?? '', layout: l };
+  return {
+    format: f.format,
+    name: f.name ?? 'untitled',
+    savedAt: f.savedAt ?? '',
+    checksum: f.checksum,
+    layout: l,
+  };
+}
+
+/** null when the file carries no checksum (nothing to check) or it matches;
+ *  otherwise the mismatch, for the caller to show. */
+export function checksumComplaint(file: LayoutFile): string | null {
+  if (!file.checksum) return null;
+  const actual = checksumOf(file.layout);
+  return actual === file.checksum
+    ? null
+    : `checksum ${actual} does not match the recorded ${file.checksum} — the file was edited after it was saved`;
 }
 
 export function saveToStorage(layout: PlayfieldLayout, name: string): boolean {
