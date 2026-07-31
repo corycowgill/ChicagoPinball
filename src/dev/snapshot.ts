@@ -67,6 +67,13 @@ function bodyRecord(b: Matter.Body, index: number) {
 export function snapshot(): string {
   const physics = new Physics();
   const pf = new Playfield(physics, noopEvents());
+  return dump(physics, pf);
+}
+
+/** Dump a world that has already been built. Split out so the layout loader
+ *  can be diffed against the hand-written constructor without either path
+ *  knowing about the other. */
+function dump(physics: Physics, pf: Playfield): string {
 
   // Insertion order matters: Matter's broadphase pair order and therefore its
   // float results depend on it. Composite.allBodies preserves it.
