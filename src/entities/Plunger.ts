@@ -1,11 +1,11 @@
 import Matter from 'matter-js';
-import { COLOR } from '../constants';
+import { COLOR, PLUNGER_HEIGHT } from '../constants';
 import { metalPost } from '../Graphics';
 
 export class Plunger {
   readonly body: Matter.Body;
   readonly width: number;
-  readonly height = 32;
+  readonly height = PLUNGER_HEIGHT;
   private restY: number;
   private pull = 0;
   private holding = false;

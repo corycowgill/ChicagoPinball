@@ -31,11 +31,21 @@ export const FLIPPER_HEIGHT = 28;
 export const FLIPPER_REST_ANGLE = 0.46;
 // 0.88 rad of sweep (50 deg). A wider sweep looks like free aim range — the
 // ball leaves along the bat's normal, so the span of angles a flipper can
-// produce IS its sweep — but -0.52 (56 deg) was measured and REJECTED:
-// total makes across a 25-point strike sweep fell 21 -> 18 and it killed
-// the bean and the lock outright (2 -> 0 each from the right flipper), because
-// swinging further past vertical throws the late-contact shots left of every
-// target on that side. It also left a ball balanced on the resting bat tip.
+// produce IS its sweep.
+//
+// -0.52 (56 deg) was tried and reverted, but READ THE CAVEAT BEFORE RETRYING.
+// A single 25-point strike sweep put total makes at 21 before and 18 after,
+// which looked conclusive and was written up that way. It was not: three
+// later sweeps of the SAME unchanged geometry scored 21, 17 and 14, so one
+// sweep carries roughly +-3 of noise and an 21->18 gap means nothing. The
+// per-shot "dead" readings are even less stable — the bean and the lock both
+// read 0 on unchanged geometry too.
+// The noise is real physics rather than a harness bug: the flip lands at a
+// different point in the substep cycle each time, and a pinball is chaotic,
+// so a fraction of a pixel at the bat is tens of pixels at the target.
+// Verdict: the wider sweep is UNPROVEN, not disproven. Anyone revisiting it
+// should use tools/makerate.mjs (repeated sweeps with an error bar) and
+// require the difference to clear ~2 sd. See tools/README.md.
 export const FLIPPER_ACTIVE_ANGLE = -0.42;
 // Per-frame radian increments — see Flipper.ts. Tuned so the tip sweeps at
 // 0.20 × 98 = 19.6 px/frame, fast enough to send a ball near the speed cap
@@ -58,6 +68,10 @@ export const FLIPPER_ROLL_DAMP = 0.94;
 // Launch speed = PLUNGER_MIN_LAUNCH + pull × PLUNGER_LAUNCH_RANGE (px/step).
 // A weak pull doesn't clear the shooter lane and rolls back to the plunger;
 // the arrival speed at the top of the lane picks the skill-shot lane.
+// The plunger head's thickness. Hoisted out of the entity because the ball's
+// rest position on the head is derived from it, and a data-driven layout has
+// to compute that without constructing the plunger first.
+export const PLUNGER_HEIGHT = 32;
 export const PLUNGER_MIN_LAUNCH = 12;
 export const PLUNGER_LAUNCH_RANGE = 10;
 

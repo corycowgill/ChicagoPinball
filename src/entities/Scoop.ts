@@ -21,13 +21,17 @@ export class Scoop {
     public readonly y: number,
     kickAngle = -Math.PI / 2 - 0.25, // up and slightly left
     kickSpeed = 18,
+    // The label used to be hardcoded 'scoop', which forced the Playfield to
+    // reach in and re-label the lake scoop after construction. Taking it as a
+    // parameter lets a layout describe the scoop completely.
+    label = 'scoop',
   ) {
     this.kickAngle = kickAngle;
     this.kickSpeed = kickSpeed;
     this.sensor = Matter.Bodies.circle(x, y, 14, {
       isStatic: true,
       isSensor: true,
-      label: 'scoop',
+      label,
     });
   }
 
