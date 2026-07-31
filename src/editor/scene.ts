@@ -15,6 +15,7 @@ import { Physics } from '../Physics';
 import { buildPlayfield } from '../layout/build';
 import { resolveLayout, ResolvedLayout } from '../layout/resolve';
 import { Diagnostic, validateLayout } from '../layout/validate';
+import { validateRules } from '../layout/feasible';
 import { allHandles, Handle } from '../layout/handles';
 import { pointToSegment } from '../layout/geometry';
 import { PlayfieldLayout, Pt } from '../layout/types';
@@ -41,7 +42,10 @@ export function buildScene(layout: PlayfieldLayout): EditorScene {
     // keeps both selectable instead of silently dropping one.
     bodiesById.set(id, [...(bodiesById.get(id) ?? []), ...bodies]);
   });
-  const diagnostics = validateLayout(resolved);
+  // Geometry first, then reachability: "this shot is blocked" is a more
+  // actionable thing to read than "this mode cannot start", and a mode is
+  // usually unreachable BECAUSE of the geometry above it.
+  const diagnostics = [...validateLayout(resolved), ...validateRules(layout)];
   const flagged = new Set<string>();
   for (const d of diagnostics) for (const id of d.elementIds) flagged.add(id);
   return { resolved, bodiesById, handles: allHandles(resolved), diagnostics, flagged };

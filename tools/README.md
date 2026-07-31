@@ -8,8 +8,14 @@ editor for it in the game itself: the **BUILD LAYOUT** button top-right, or
 
 - drag anything; handles resize circles, bend polylines and aim rails
 - the palette adds posts, rails, bumpers, targets, scoops, spinners, sensors
-- the rules from `src/layout/validate.ts` run on every edit and list what they
-  find; clicking a diagnostic selects the offender
+- two rule sets run on every edit and list what they find; clicking a
+  diagnostic selects the offender:
+  - `src/layout/validate.ts` — geometry: clearances, corridors, flipper sweep,
+    sensor arity, ramp joins
+  - `src/layout/feasible.ts` — reachability: whether the board still supports
+    the rules the game ships. The rules engine is keyed by collision label, so
+    deleting the left ramp throws nothing and looks like nothing — BASEBALL
+    simply never starts.
 - **Play this board** saves to `localStorage` and reloads into the game
 - **Export JSON** / **Coordinates** get the board back out
 - `?stock` plays the shipped board without clearing what you saved
