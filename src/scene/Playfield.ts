@@ -558,9 +558,13 @@ export class Playfield {
   /** Fire the kickback: rocket the ball back up the left outlane channel. */
   fireKickback(ball: Matter.Body) {
     this.lastKickbackAt = this.clockMs;
+    // Impulse and lift come from the layout's own outlane sensor. They used to
+    // be literals here, which meant the eject audit could bless numbers the
+    // game never used.
+    const k = this.resolved.kickbackImpulse;
     this.physics.defer(() => {
-      Matter.Body.setPosition(ball, { x: this.kickbackPos.x, y: this.kickbackPos.y - 6 });
-      Matter.Body.setVelocity(ball, { x: 0.6, y: -21 });
+      Matter.Body.setPosition(ball, { x: this.kickbackPos.x, y: this.kickbackPos.y + k.riseY });
+      Matter.Body.setVelocity(ball, { x: k.vx, y: k.vy });
       Matter.Body.setAngularVelocity(ball, 0);
     });
   }

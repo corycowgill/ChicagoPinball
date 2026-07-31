@@ -231,6 +231,9 @@ export const DEFAULT_LAYOUT: PlayfieldLayout = {
       feedsInlane: 'inlane-left',
     },
 
+    // The audit reads 27% into the left outlane on this one — same failure
+    // shape as the mode scoop below, one notch less severe: the eject clips
+    // the left ramp's outer wall and drops into the left channel.
     { kind: 'scoop', id: 'scoop-lake', label: 'lake-scoop', x: 80, y: 540, kickAngle: -Math.PI / 2 + 0.35, kickSpeed: 15 },
     // Kick nearly vertical: the old (-0.35, 15) ricocheted off the CAGO bank
     // and fed the right outlane — draining as a reward for making the shot.
@@ -239,6 +242,13 @@ export const DEFAULT_LAYOUT: PlayfieldLayout = {
     { kind: 'captive', id: 'captive', x: 420, y: 494 },
     { kind: 'spinner', id: 'spinner', cx: 63, cy: 678, length: 34 },
 
+    // KNOWN DEFECT, found by tools/ejectaudit.mts: this kickback returns the
+    // ball to its own outlane on 73% of its fan. It is not the impulse — a
+    // sweep of vx 0.4..1.6 x vy -21..-33 could not get below 40%. The left
+    // channel above the outlane is a blind funnel between the cabinet wall
+    // and the left ramp's outer wall, so whatever goes up it comes back down
+    // it. Fixing that is a bottom-corner geometry change, tracked separately;
+    // the audit is what will prove it fixed.
     { kind: 'sensor', id: 'left-outlane', role: 'left-outlane', x: 21, y: 884, w: 38, h: 10, kicker: { vx: 0.6, vy: -21, riseY: -6 } },
     { kind: 'sensor', id: 'inlane-left', role: 'inlane-left', x: 63, y: 712, w: 34, h: 12 },
     { kind: 'sensor', id: 'inlane-right', role: 'inlane-right', x: PLAY_RIGHT - 63, y: 712, w: 34, h: 12 },
@@ -247,5 +257,69 @@ export const DEFAULT_LAYOUT: PlayfieldLayout = {
     { kind: 'sensor', id: 'right-loop', role: 'right-loop', x: 462, y: 340, w: 34, h: 10 },
 
     { kind: 'drain', id: 'drain', y: PLAYFIELD_H - 4, h: 6, inset: 12 },
+  ],
+
+  // ── Design intent, made checkable ────────────────────────────────────────
+  // No-build zones. These were previously only source comments, and at least
+  // one of them was WRONG: the soccer legs were placed at x=383 "so the
+  // captive-lane approach corridor (x >= ~389) must stay clear", but that
+  // arithmetic omits the ball's own 11 px radius, so a 2.5 px post at 383
+  // actually excludes the ball's centre out to x=396.5.
+  corridors: [
+    {
+      id: 'captive-approach',
+      a: { x: PLAY_CENTER + 118, y: PLAYFIELD_H - 200 },
+      b: { x: 420, y: 494 },
+      width: 30,
+      note: 'right flipper to the captive mouth',
+      target: 'captive',
+    },
+    {
+      id: 'loop-channel-left',
+      a: { x: 20, y: 590 },
+      b: { x: 20, y: 340 },
+      width: 30,
+      note: 'left orbit lane',
+    },
+    {
+      id: 'loop-channel-right',
+      a: { x: 462, y: 590 },
+      b: { x: 462, y: 340 },
+      width: 30,
+      note: 'right orbit lane',
+    },
+  ],
+
+  // Measured against the shipped board by tools/baseline.mts. The board is
+  // ground truth, so thresholds are seeded FROM it: a line that is already
+  // obstructed records that fact rather than failing the build. Regressions
+  // are caught by a DECREASE from the baseline, not by an absolute floor —
+  // otherwise a shot clearing by 122 px could be walked down to 1 px and
+  // nothing would complain.
+  //
+  // Two lines start negative and both are real, known defects rather than
+  // measurement noise: the soccer legs sit across the left flipper's lines to
+  // the captive and to the mode scoop. The captive figure (-10) independently
+  // reproduces a blocker found by hand from a completely different direction,
+  // and the captive is the shot that measured 0 makes in 25 strike points.
+  //
+  // The Bean has no shot line: it sits behind the pop nest by design and is
+  // reached THROUGH the nest, so a straight line from a flipper measures
+  // nothing meaningful.
+  shotLines: [
+    { id: 'L->ramp-left', from: 'left-flipper', to: 'ramp-left', baselineClearance: 71, minClearance: 0 },
+    { id: 'L->ramp-right', from: 'left-flipper', to: 'ramp-right', baselineClearance: 10, minClearance: 0 },
+    { id: 'L->scoop-lake', from: 'left-flipper', to: 'scoop-lake', baselineClearance: 122, minClearance: 0 },
+    { id: 'L->scoop-mode', from: 'left-flipper', to: 'scoop-mode', baselineClearance: -13, minClearance: -13 },
+    { id: 'L->captive', from: 'left-flipper', to: 'captive', baselineClearance: -10, minClearance: -10 },
+    { id: 'L->left-loop', from: 'left-flipper', to: 'left-loop', baselineClearance: 160, minClearance: 0 },
+    { id: 'L->right-loop', from: 'left-flipper', to: 'right-loop', baselineClearance: 51, minClearance: 0 },
+    { id: 'R->ramp-left', from: 'right-flipper', to: 'ramp-left', baselineClearance: 10, minClearance: 0 },
+    { id: 'R->ramp-right', from: 'right-flipper', to: 'ramp-right', baselineClearance: 39, minClearance: 0 },
+    { id: 'R->scoop-lake', from: 'right-flipper', to: 'scoop-lake', baselineClearance: 29, minClearance: 0 },
+    { id: 'R->scoop-mode', from: 'right-flipper', to: 'scoop-mode', baselineClearance: 0, minClearance: 0 },
+    { id: 'R->captive', from: 'right-flipper', to: 'captive', baselineClearance: 8, minClearance: 0 },
+    { id: 'R->left-loop', from: 'right-flipper', to: 'left-loop', baselineClearance: 66, minClearance: 0 },
+    { id: 'R->right-loop', from: 'right-flipper', to: 'right-loop', baselineClearance: 67, minClearance: 0 },
   ],
 };

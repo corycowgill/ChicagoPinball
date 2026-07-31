@@ -81,7 +81,25 @@ export type StaticDesc =
   /** Render-list only — NO body. Distinct from 'post' because today the only
    *  thing distinguishing the two is which array they were pushed into. */
   | { kind: 'deco-post'; id: ElementId; x: number; y: number; r?: number }
-  | { kind: 'sensor'; id: ElementId; role: SensorRole; x: number; y: number; w: number; h: number };
+  | SensorDesc;
+
+/** A labelled trigger rectangle. Identical whether authored in `statics` or in
+ *  `elements` — the two arrays differ only in build order — so both take this
+ *  one shape. Anything that walks sensors (validation, the eject audit) can
+ *  then scan both arrays without caring which one an author picked. */
+export interface SensorDesc {
+  kind: 'sensor';
+  id: ElementId;
+  role: SensorRole;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Outlanes only: the impulse this lane's kicker applies, and how far above
+   *  the sensor the ball is lifted before it fires. Read by Playfield's
+   *  kickback so the numbers live in the layout rather than in two places. */
+  kicker?: { vx: number; vy: number; riseY: number };
+}
 
 // ── Elements: built SECOND, in array order (today's constructor body) ───────
 
@@ -150,17 +168,7 @@ export type ElementDesc =
     }
   | { kind: 'captive'; id: ElementId; x: number; y: number }
   | { kind: 'spinner'; id: ElementId; cx: number; cy: number; length: number }
-  | {
-      kind: 'sensor';
-      id: ElementId;
-      role: SensorRole;
-      x: number;
-      y: number;
-      w: number;
-      h: number;
-      /** Outlanes only: the kicker impulse, today hardcoded in fireKickback. */
-      kicker?: { vx: number; vy: number; riseY: number };
-    }
+  | SensorDesc
   /** x and width derived from the frame; only the depth is authored. */
   | { kind: 'drain'; id: ElementId; y: number; h: number; inset: number };
 
@@ -176,6 +184,10 @@ export interface Corridor {
   b: Pt;
   width: number;
   note: string;
+  /** The element this corridor is the approach TO. A corridor ends at its
+   *  destination, so the destination necessarily overlaps it and must be
+   *  exempt — otherwise every approach flags the thing it approaches. */
+  target?: ElementId;
 }
 
 /** A flipper-to-target shot line carrying the clearance it has TODAY.

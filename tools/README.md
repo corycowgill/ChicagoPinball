@@ -1,3 +1,55 @@
+# Tools
+
+Two families, and the difference matters.
+
+**Deterministic checks** (`verify.sh`, `layoutdiff`, `validate`, `rulecheck`,
+`ejectaudit`) run headless under Node with no browser and no randomness. Run
+them the same way twice and you get the same bytes. They answer questions
+about the board with certainty.
+
+**Measurement probes** (`shotodds`, `makerate`, `cradle`) drive the real game
+in a browser and count what it scores. They answer questions the code alone
+cannot — but they carry a real error bar, documented below, that cost this
+project three withdrawn conclusions.
+
+---
+
+# Deterministic checks
+
+```
+bash tools/verify.sh              # both oracles, print digests
+bash tools/verify.sh save NAME    # record a baseline
+bash tools/verify.sh check NAME   # diff against it (exit 1 on drift)
+```
+
+`verify.sh` runs the two determinism oracles: a bit-exact dump of the
+constructed world, and a fixed 3600-step replay digested into a trajectory
+hash plus an ordered ScoreEvent stream. Together they detect a one-pixel
+change. Save a baseline before touching layout code; check it after.
+
+The rest are bundled with esbuild and run under Node:
+
+```
+npx esbuild tools/validate.mts   --bundle --platform=node --format=esm --outfile=/tmp/x.mjs && node /tmp/x.mjs
+```
+
+- **`layoutdiff.mts`** — builds the board twice, once through the layout
+  loader and once through the old hand-written constructor, and compares every
+  body. The proof that turning the playfield into data changed nothing.
+- **`validate.mts`** — runs the layout rules (clearances, corridors, flipper
+  sweep, sensor arity) and prints diagnostics. Instant; this is what the
+  editor calls on every drag.
+- **`rulecheck.mts`** — mutates the board once per rule and asserts that rule
+  fires. A validator that cannot fail reads as coverage while providing none,
+  so the rules are held to the same standard as the oracles.
+- **`ejectaudit.mts`** — fires every kicker described by the layout (both
+  scoops, both ramp exits, the outlane kickback) as a deterministic fan of
+  angle × speed variants, steps the **real engine**, and reports the fraction
+  that end in an outlane. This is the only check that catches "making the shot
+  loses the ball" — the class of bug the mode scoop shipped with.
+
+---
+
 # Measurement probes
 
 Headless Playwright probes that measure how the machine actually plays. They

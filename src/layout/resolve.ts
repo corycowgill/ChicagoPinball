@@ -6,7 +6,7 @@
  *  `playCenter`, because it isn't a thing you can place.
  */
 import { BALL_RADIUS, PLUNGER_HEIGHT } from '../constants';
-import { ElementDesc, Frame, PlayfieldLayout, Pt, SensorRole } from './types';
+import { ElementDesc, Frame, PlayfieldLayout, Pt, SensorDesc, SensorRole } from './types';
 
 export interface ResolvedFrame extends Frame {
   /** Right edge of the play area proper — the shooter lane is outside it. */
@@ -26,8 +26,13 @@ export interface ResolvedLayout {
   /** Sensor centres by role — the single source of truth for positions that
    *  used to be duplicated as loose literals (loop arrow x's, kicker spots). */
   sensorPos: Partial<Record<SensorRole, Pt>>;
+  /** The sensor descriptors themselves, by role — needed by anything that
+   *  wants more than a position (the kickback wants its impulse). */
+  sensors: Partial<Record<SensorRole, SensorDesc>>;
   loopArrowXs: number[];
   kickbackPos: Pt;
+  /** Impulse the left-outlane kicker applies, authored on that sensor. */
+  kickbackImpulse: { vx: number; vy: number; riseY: number };
   expressPos: Pt;
 }
 
@@ -58,12 +63,12 @@ export function resolveLayout(layout: PlayfieldLayout): ResolvedLayout {
   };
 
   // Sensors can be declared in either array; collect both.
+  const sensors: Partial<Record<SensorRole, SensorDesc>> = {};
   const sensorPos: Partial<Record<SensorRole, Pt>> = {};
-  for (const s of layout.statics) {
-    if (s.kind === 'sensor') sensorPos[s.role] = { x: s.x, y: s.y };
-  }
-  for (const e of layout.elements) {
-    if (e.kind === 'sensor') sensorPos[e.role] = { x: e.x, y: e.y };
+  for (const s of [...layout.statics, ...layout.elements]) {
+    if (s.kind !== 'sensor') continue;
+    sensors[s.role] = s;
+    sensorPos[s.role] = { x: s.x, y: s.y };
   }
 
   const fallback = { x: 0, y: 0 };
@@ -71,6 +76,7 @@ export function resolveLayout(layout: PlayfieldLayout): ResolvedLayout {
     layout,
     frame,
     sensorPos,
+    sensors,
     // Previously a literal [20, 462] that duplicated the loop sensors' own x
     // coordinates — two sources of truth for one fact.
     loopArrowXs: [
@@ -78,6 +84,7 @@ export function resolveLayout(layout: PlayfieldLayout): ResolvedLayout {
       sensorPos['right-loop']?.x ?? 462,
     ],
     kickbackPos: sensorPos['left-outlane'] ?? fallback,
+    kickbackImpulse: sensors['left-outlane']?.kicker ?? { vx: 0.6, vy: -21, riseY: -6 },
     expressPos: sensorPos['right-outlane'] ?? fallback,
   };
 }
