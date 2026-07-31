@@ -155,6 +155,46 @@ That is why shotodds.mjs exists.
 The one thing makerate does support: a shot reading 0 across *many* runs is
 genuinely dead. The captive has read 0 in every run of every measurement.
 
+## kickback.mjs — does the outlane save actually save?
+
+The eject audit says where one eject *goes*. This says whether the *feature*
+works: it fires the kickback for real, lets the real game loop handle whatever
+comes back, and asks whether the ball was still in play afterwards.
+
+One arm per run, because the renderer does not reliably survive two:
+
+```
+MODE=oneshot node tools/kickback.mjs     # award spent on the first fire
+MODE=retry   node tools/kickback.mjs     # award held until the save sticks
+T=20 MODE=retry node tools/kickback.mjs
+```
+
+The result that motivated the retry logic, same window both arms:
+
+```
+oneshot  saved  0/10   (0%)
+retry    saved  9/10  (90%)   attempts used: 2,2,2,2,2,2,2,2,0,2
+```
+
+Four harness traps live in this file, all of which produced confidently wrong
+numbers — or none at all — before they were found. They are worth reading
+before writing any probe against this game:
+
+1. **A drain is detected by the game STATE, not the ball's position.** The ball
+   is respawned on the plunger, high on the board, so a snapshot at the end of
+   a trial cannot tell a save from a drain-and-respawn. The first version of
+   this probe reported a flawless 16/16 for *both* arms on that basis.
+2. **Never teleport a ball by writing `body.position`.** That leaves Matter's
+   bounds and vertices stale, so the sensor never fires and every trial
+   silently records zero kickbacks.
+3. **Never wait for `networkidle`.** Vite's HMR websocket never lets the page
+   go idle, so `goto` blocks until its timeout.
+4. **Time trials in GAME time, not wall clock.** Under software GL this page
+   advances about 580 ms of game time per 3.8 s of wall clock — a 6.5x
+   slowdown, caused by the three.js scene and *not* fixed by shrinking the
+   viewport. A wall-clock window measures a different amount of pinball on
+   every machine. Poll `game.timeMs`, which advances one fixed step per update.
+
 ## cradle.mjs — can you trap a ball and shoot it?
 
 Checks the three things flipper control depends on:

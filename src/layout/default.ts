@@ -244,11 +244,20 @@ export const DEFAULT_LAYOUT: PlayfieldLayout = {
 
     // KNOWN DEFECT, found by tools/ejectaudit.mts: this kickback returns the
     // ball to its own outlane on 73% of its fan. It is not the impulse — a
-    // sweep of vx 0.4..1.6 x vy -21..-33 could not get below 40%. The left
-    // channel above the outlane is a blind funnel between the cabinet wall
-    // and the left ramp's outer wall, so whatever goes up it comes back down
-    // it. Fixing that is a bottom-corner geometry change, tracked separately;
-    // the audit is what will prove it fixed.
+    // sweep of vx 0.4..1.6 x vy -21..-40 could not get below 40%, and neither
+    // could moving the kicker up the lane. The left channel above the outlane
+    // is an open vertical corridor bounded by the cabinet wall, so whatever
+    // goes up it comes back down it.
+    //
+    // The GEOMETRY is still unfixed and still needs a lower-left redesign.
+    // What changed is the rules side: Game.handleLeftOutlane keeps the award
+    // lit across the bounce-backs instead of spending it on the first failed
+    // attempt, which took the measured save rate from 0/10 to 9/10.
+    //
+    // Two instruments to hold a geometry change to, and they answer different
+    // questions: tools/ejectaudit.mts says where one eject goes, and
+    // tools/kickback.mjs says whether the feature works. A redesign should
+    // move the audit's 73% down — the retry logic cannot, and does not.
     { kind: 'sensor', id: 'left-outlane', role: 'left-outlane', x: 21, y: 884, w: 38, h: 10, kicker: { vx: 0.6, vy: -21, riseY: -6 } },
     { kind: 'sensor', id: 'inlane-left', role: 'inlane-left', x: 63, y: 712, w: 34, h: 12 },
     { kind: 'sensor', id: 'inlane-right', role: 'inlane-right', x: PLAY_RIGHT - 63, y: 712, w: 34, h: 12 },

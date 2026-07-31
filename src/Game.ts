@@ -336,13 +336,61 @@ export class Game {
     }, this.layout);
   }
 
+  /** The kickback fires the ball back up the left outlane — and the eject
+   *  audit (tools/ejectaudit.mts) measures that the ball returns to that same
+   *  outlane on 73% of a 15-trial fan. Measured end to end in the live game
+   *  (tools/kickback.mjs), the shipped one-shot award saved the ball **0 times
+   *  out of 10**. It was a feature that never worked.
+   *
+   *  It is the channel, not the impulse: a sweep of vx 0.4..1.6 x vy -21..-40,
+   *  and of moving the kicker up the lane, never got below 40%. The left lane
+   *  above the outlane is an open vertical corridor, so what goes up it comes
+   *  back down it. Fixing that is a redesign of the lower-left quadrant.
+   *
+   *  Until then, the award must not be SPENT on a failed attempt. A kickback
+   *  reads to a player as "this outlane is closed", so it stays lit while the
+   *  ball keeps falling back into it, and is consumed only once the save has
+   *  actually held. A return within RETRY_MS is the same failed save, not a
+   *  new one; anything later means the ball got away and the light is used up.
+   *  Capped so a pathological rattle cannot fire it forever.
+   *
+   *  Same probe, same window, with this in place: **9 saved out of 10**, at a
+   *  median of 2 attempts per save.
+   */
+  private static readonly KICKBACK_RETRY_MS = 2500;
+  private static readonly KICKBACK_MAX_TRIES = 6;
+  private kickbackTries = 0;
+  private lastKickbackFireAt = -1e9;
+
   private handleLeftOutlane(ball: Matter.Body) {
     if (this.state !== GameState.PLAYING || this.tilted || !this.kickbackLit) return;
-    this.kickbackLit = false; // one shot per light
+    const sinceFire = this.timeMs - this.lastKickbackFireAt;
+    const sameSave = sinceFire < Game.KICKBACK_RETRY_MS;
+    if (sameSave) {
+      this.kickbackTries++;
+      if (this.kickbackTries >= Game.KICKBACK_MAX_TRIES) this.kickbackLit = false;
+    } else {
+      // A fresh save: the previous one either held or never happened.
+      this.kickbackTries = 1;
+    }
+    this.lastKickbackFireAt = this.timeMs;
     this.playfield.fireKickback(ball);
-    this.renderer.pushToast('KICKBACK!', COLOR.NEON_GREEN, 1100);
+    this.renderer.pushToast(
+      sameSave ? 'KICKBACK — AGAIN!' : 'KICKBACK!',
+      COLOR.NEON_GREEN,
+      1100,
+    );
     this.renderer.kick(3);
     this.sound.kickback();
+  }
+
+  /** Retire the award once a save has held: the ball has been out of the
+   *  outlane for longer than a bounce-back would take. Called from update(). */
+  private tickKickback() {
+    if (!this.kickbackLit || this.kickbackTries === 0) return;
+    if (this.timeMs - this.lastKickbackFireAt < Game.KICKBACK_RETRY_MS) return;
+    this.kickbackLit = false;
+    this.kickbackTries = 0;
   }
 
   private handleRightOutlane(ball: Matter.Body) {
@@ -1141,6 +1189,7 @@ export class Game {
     }
 
     this.timeMs += dtMs;
+    this.tickKickback();
 
     if (this.input.wasPressed('mute')) {
       const muted = this.sound.toggleMute();
@@ -1432,6 +1481,7 @@ export class Game {
     this.tilted = false;
     this.bumperHits = 0;
     this.kickbackLit = false;
+    this.kickbackTries = 0;
     this.mysteryLit = true; // one free Mystery per ball
     for (const s of this.playfield.standups) s.lit = false;
     this.state = GameState.READY;
@@ -1564,6 +1614,7 @@ export class Game {
     this.tilted = false;
     this.bumperHits = 0;
     this.kickbackLit = false;
+    this.kickbackTries = 0;
     this.mysteryLit = true;
     this.multiballActive = false;
     this.ballSaveMs = 0;
