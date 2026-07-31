@@ -16,9 +16,18 @@ export class CaptiveBall {
   readonly posts: { x: number; y: number; r: number }[];
   private flash = 0;
 
+  /** Inner width between the side walls, and the half-width out to the OUTER
+   *  face of a side wall. Exposed so layout validation can check the lane's
+   *  clearance to the shooter wall by reading the entity instead of copying
+   *  these numbers — the copied-literal pattern is exactly what let the 3D
+   *  rails and the physics rails drift apart. */
+  static readonly LANE_W = 40;
+  static readonly WALL_T = 6;
+  static readonly OUTER_HALF = CaptiveBall.LANE_W / 2 + CaptiveBall.WALL_T;
+
   /** x,y = centre of the OPEN mouth at the bottom of the lane. */
   constructor(public readonly x: number, public readonly y: number) {
-    const laneW = 40; // inner width between the side walls
+    const laneW = CaptiveBall.LANE_W; // inner width between the side walls
     const laneTop = y - 74;
     const anchorY = laneTop + 8;
     const restY = y - 12; // captive centre when resting on the posts
@@ -41,7 +50,7 @@ export class CaptiveBall {
       damping: 0.06,
     });
 
-    const t = 6;
+    const t = CaptiveBall.WALL_T;
     const wallLen = y - laneTop - 4;
     this.walls.push(
       Matter.Bodies.rectangle(x - laneW / 2 - t / 2, laneTop + wallLen / 2, t, wallLen, {

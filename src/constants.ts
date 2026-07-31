@@ -68,6 +68,10 @@ export const FLIPPER_ROLL_DAMP = 0.94;
 // Launch speed = PLUNGER_MIN_LAUNCH + pull × PLUNGER_LAUNCH_RANGE (px/step).
 // A weak pull doesn't clear the shooter lane and rolls back to the plunger;
 // the arrival speed at the top of the lane picks the skill-shot lane.
+// The plunger head's thickness. Hoisted out of the entity because the ball's
+// rest position on the head is derived from it, and a data-driven layout has
+// to compute that without constructing the plunger first.
+export const PLUNGER_HEIGHT = 32;
 export const PLUNGER_MIN_LAUNCH = 12;
 export const PLUNGER_LAUNCH_RANGE = 10;
 

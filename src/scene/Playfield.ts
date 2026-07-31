@@ -298,8 +298,7 @@ export class Playfield {
     physics.add(this.rightRamp.entry);
 
     // ── LAKE MICHIGAN SCOOP — saucer up the left side. ──
-    this.lakeMichiganScoop = new Scoop(80, 540, -Math.PI / 2 + 0.35, 15);
-    (this.lakeMichiganScoop.sensor as Matter.Body).label = 'lake-scoop';
+    this.lakeMichiganScoop = new Scoop(80, 540, -Math.PI / 2 + 0.35, 15, 'lake-scoop');
     physics.add(this.lakeMichiganScoop.sensor);
 
     // ── CITY TOUR SCOOP — mode-start saucer up the right side. ──
