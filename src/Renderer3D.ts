@@ -1482,26 +1482,40 @@ export class Renderer3D {
     this.scene.add(group);
   }
 
-  /** SOCCER — goal frame + net on the WEST side of the MODE scoop, mouth
-   *  facing the hole. The east side stays open: it's the captive-lane
-   *  approach corridor (posts there deflected the captive shot). */
+  /** SOCCER — goal frame + net in front of the MODE scoop, standing ON the
+   *  two physics posts and facing whichever way they face.
+   *
+   *  Every dimension here is READ from `soccer-post-n` / `soccer-post-s` in
+   *  the layout. It used to derive its own from `scoop.x - 17, scoop.y ± 12`
+   *  while default.ts authored the physics posts separately — two copies of
+   *  one placement, which is exactly how the 3D rails and the physics rails
+   *  drifted apart. It also meant the goal could be turned in the layout and
+   *  stay put on screen, and turning it is precisely what this round did:
+   *  the goal was built side-on to every shot that arrives at it. */
   private buildSoccer(pf: Playfield) {
-    const sx = pf.cityTourScoop.x;
-    const sz = pf.cityTourScoop.y;
-    const gx = sx - 17; // goal line
+    const a = pf.postAt('soccer-post-n');
+    const b = pf.postAt('soccer-post-s');
+    if (!a || !b) return; // the board may have deleted them — see standIns()
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const span = Math.hypot(b.x - a.x, b.y - a.y);
+    // The goal line runs post to post; the mouth faces along its normal, and
+    // the scoop tells us which of the two normals is "behind".
+    const along = Math.atan2(b.y - a.y, b.x - a.x);
     const group = new THREE.Group();
     const frameMat = new THREE.MeshStandardMaterial({ color: 0xf5fbff, roughness: 0.35 });
-    for (const gz of [sz - 12, sz + 12]) {
+    for (const p of [a, b]) {
       const post = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 18, 8), frameMat);
-      post.position.set(gx, 9, gz);
+      post.position.set(p.x, 9, p.y);
       group.add(post);
     }
-    const crossbar = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 25, 8), frameMat);
+    const crossbar = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, span, 8), frameMat);
     crossbar.rotation.x = Math.PI / 2;
-    crossbar.position.set(gx, 18, sz);
+    crossbar.rotation.y = -along;
+    crossbar.position.set(mid.x, 18, mid.y);
     group.add(crossbar);
+    // Net behind the mouth: half way from the goal line to the scoop.
     const net = new THREE.Mesh(
-      new THREE.PlaneGeometry(24, 22),
+      new THREE.PlaneGeometry(span, 22),
       new THREE.MeshStandardMaterial({
         color: 0xf5fbff,
         transparent: true,
@@ -1510,10 +1524,17 @@ export class Renderer3D {
         wireframe: true,
       }),
     );
-    net.rotation.y = Math.PI / 2;
+    net.rotation.y = -along;
     net.rotation.x = -0.9;
-    net.position.set(gx - 8, 10, sz);
+    net.position.set(
+      (mid.x + pf.cityTourScoop.x) / 2,
+      10,
+      (mid.y + pf.cityTourScoop.y) / 2,
+    );
     group.add(net);
+    // Green goal lamp, on the goal's own centreline above the crossbar. It
+    // used to be pinned 18px north of the goal, which only read as "behind"
+    // while the goal faced west.
     // Green goal lamp.
     const lampMat = new THREE.MeshStandardMaterial({
       color: 0x0a2a14,
@@ -1521,7 +1542,7 @@ export class Renderer3D {
       emissiveIntensity: 0.15,
     });
     const lamp = new THREE.Mesh(new THREE.SphereGeometry(2.8, 10, 8), lampMat);
-    lamp.position.set(gx, 22, sz - 18);
+    lamp.position.set(mid.x, 24, mid.y);
     this.soccerLampMat = lampMat;
     group.add(lamp);
     this.scene.add(group);

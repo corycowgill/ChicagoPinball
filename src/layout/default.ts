@@ -119,8 +119,63 @@ const statics: StaticDesc[] = [
   { kind: 'post', id: 'baseball-leg-sw', x: 110, y: 288, r: 3, restitution: 0.4, skin: 'wood' },
   { kind: 'post', id: 'hockey-leg-nw', x: 380, y: 236, r: 3, restitution: 0.4, skin: 'wood' },
   { kind: 'post', id: 'hockey-leg-se', x: 431, y: 281, r: 3, restitution: 0.4, skin: 'wood' },
-  { kind: 'post', id: 'soccer-post-n', x: 383, y: 533, r: 2.5, restitution: 0.4, skin: 'wood' },
-  { kind: 'post', id: 'soccer-post-s', x: 383, y: 557, r: 2.5, restitution: 0.4, skin: 'wood' },
+  // The soccer goal, which is also the mode scoop's funnel. These two are the
+  // physics for the 3D goalposts, and Renderer3D reads them from here by id —
+  // it used to derive its own from `scoop.x - 17, scoop.y ± 12`, which is the
+  // copied-literal pattern that let the 3D rails and the physics rails drift
+  // apart once already.
+  //
+  // They used to sit on a VERTICAL line 17px west of the scoop, because the
+  // goal was built "mouth facing the hole" from the west. Nothing arrives
+  // from the west. Both flipper shots come from the south-west — 50.2 deg
+  // above horizontal off the left bat, 61.6 off the right — so the goal stood
+  // side-on to every shot it exists to receive, and its 24px mouth measured
+  // only 15.4px across the shot, for a ball that needs 27.
+  //
+  // Three things were learned fixing it, and only the third one shipped.
+  //
+  // 1. THE POSTS WERE NEVER THE BLOCKER. Deleting both entirely leaves the
+  //    mode scoop at 1/96 on tools/shotreach.mts, exactly as shipped. The
+  //    -9px and -5px clearances the validator reported against them were real
+  //    arithmetic about a straight line and told us nothing about the shot.
+  //    (The same null test debunked these posts as the captive's blocker a
+  //    round earlier. Twice now.)
+  //
+  // 2. WHAT THEY CAN BE IS A FUNNEL — the part the ramp mouths already use,
+  //    deflecting near-misses in. But a funnel wants to sit in FRONT of the
+  //    hole, and in front of this hole is where the right orbit's return gate
+  //    delivers its ball. Moved 22px down-shot, the mode scoop went 1 -> 7
+  //    and the CHICAGO bank 5 -> 11 — and right-orbit returns reaching a
+  //    flipper collapsed from 100% to 12%, undoing a whole previous round.
+  //    Only one placement in 60 cleared the gate by 28px, and it was worse.
+  //
+  // 3. AND A THIRD CONSTRAINT ONLY THE EJECT AUDIT COULD SEE. The next
+  //    candidate put a post 4.5px from the scoop's centre — effectively a
+  //    backboard in the hole. It read best of all on make rate, and
+  //    tools/ejectaudit.mts caught what that cost: the mode scoop's own kick
+  //    started clipping it into the RIGHT OUTLANE on 20% of its fan, up from
+  //    0%. Making the shot would have lost the ball, which is the single
+  //    worst bug this board has ever shipped. Proximity to the scoop is not a
+  //    usable proxy either — the ORIGINAL posts sit 20.8px from its centre,
+  //    inside its capture circle, because a goal belongs at the mouth. Only
+  //    firing the kicker answers it.
+  //
+  // The shipped placement is the best of 58 that clear the return gate by
+  // 28px, searched over centre x angle x width and filtered on the eject:
+  //
+  //     mode scoop    1/96 -> 6/96
+  //     CHICAGO bank  5/96 -> 10/96
+  //     captive       0/96 -> 1/96   (its first non-zero reading, ever)
+  //     right orbit   2/96 unchanged, returns still 100%
+  //     scoop eject   0% into an outlane, unchanged
+  //
+  // 25 deg, not the 55 the bisector of the two approaches predicts. A funnel
+  // does not want to face the shot square on — square on it stops the ball.
+  // Angled shallower it glances the ball onward into the hole, which is what
+  // the ramp funnels do. The analysis was corrected by the measurement here,
+  // not confirmed by it.
+  { kind: 'post', id: 'soccer-post-n', x: 372, y: 526, r: 2.5, restitution: 0.4, skin: 'wood' },
+  { kind: 'post', id: 'soccer-post-s', x: 386, y: 556, r: 2.5, restitution: 0.4, skin: 'wood' },
 ];
 
 export const DEFAULT_LAYOUT: PlayfieldLayout = {
@@ -370,14 +425,21 @@ export const DEFAULT_LAYOUT: PlayfieldLayout = {
     { id: 'L->ramp-left', from: 'left-flipper', to: 'ramp-left', baselineClearance: 3, minClearance: 0 },
     { id: 'L->ramp-right', from: 'left-flipper', to: 'ramp-right', baselineClearance: 3, minClearance: 0 },
     { id: 'L->scoop-lake', from: 'left-flipper', to: 'scoop-lake', baselineClearance: 17, minClearance: 0 },
-    { id: 'L->scoop-mode', from: 'left-flipper', to: 'scoop-mode', baselineClearance: -9, minClearance: -9 },
+    // These two barely moved when the soccer goal was re-aimed: -9/-5 before,
+    // -10/-7 after. The mode scoop went from 1 make in 96 to 6 over the same
+    // change. That is the clearest demonstration on this board of what a shot
+    // line is and is not — the straight-line gap to the target is not the
+    // makeability of the shot, and a change can improve one while nudging the
+    // other the wrong way. Judge geometry edits with tools/shotreach.mts;
+    // these numbers are a regression tripwire, not a score.
+    { id: 'L->scoop-mode', from: 'left-flipper', to: 'scoop-mode', baselineClearance: -10, minClearance: -10 },
     { id: 'L->captive', from: 'left-flipper', to: 'captive', baselineClearance: -11, minClearance: -11 },
     { id: 'L->left-loop', from: 'left-flipper', to: 'left-loop', baselineClearance: -11, minClearance: -11 },
     { id: 'L->right-loop', from: 'left-flipper', to: 'right-loop', baselineClearance: -12, minClearance: -12 },
     { id: 'R->ramp-left', from: 'right-flipper', to: 'ramp-left', baselineClearance: 3, minClearance: 0 },
     { id: 'R->ramp-right', from: 'right-flipper', to: 'ramp-right', baselineClearance: 3, minClearance: 0 },
     { id: 'R->scoop-lake', from: 'right-flipper', to: 'scoop-lake', baselineClearance: 13, minClearance: 0 },
-    { id: 'R->scoop-mode', from: 'right-flipper', to: 'scoop-mode', baselineClearance: -5, minClearance: -5 },
+    { id: 'R->scoop-mode', from: 'right-flipper', to: 'scoop-mode', baselineClearance: -7, minClearance: -7 },
     // The right flipper's line to the captive is blocked by the mode scoop's
     // capture circle and, before that, by the right slingshot itself. Kept
     // rather than deleted so the fact is recorded and any edit that changes

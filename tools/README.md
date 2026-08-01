@@ -129,6 +129,29 @@ npx esbuild tools/validate.mts   --bundle --platform=node --format=esm --outfile
   EXPRESS and a board with no risk on the sides. Prints the shipped board
   against a variant with the return gates removed, so both numbers sit side by
   side.
+- **`shotreach.mts`** — which shots can this board make, and from where on the
+  bat? Cradles a ball on the real bat at 12 strike points x 4 settle times x 2
+  bats, swings the real flipper, steps the real world, and counts what scores.
+  Deterministic, so unlike `shotodds.mjs` (sd 4.3–5.3 on unchanged geometry)
+  it can resolve a single shot's change; unlike `validate.mts` it measures the
+  shot rather than a straight line drawn where the shot might go.
+
+  `CONTROLS=1` deletes each target in turn and checks its row falls to zero —
+  ten of twelve rows are controllable and all ten fall.
+
+  Read the count as **the size of the window**, not a probability: how much of
+  the (strike point x settle) space produces the shot. Sweeping settle time
+  rather than picking one is deliberate — dwell 0 is the only setting that
+  finds the mode scoop and dwell 3 the only one that finds the right orbit, so
+  any single choice reports itself as a fact about the board.
+
+  Three harness bugs it had first, all of which produced confident numbers:
+  exact-matching target keys (a drop target reports as `drop-target:C`, so two
+  rows read 0 while the board was hitting them constantly); holding the bat up
+  for the whole trial instead of tapping it; and sampling fracs past 0.88,
+  where the ball is off the end of the bat and launch speed falls from 20.1 to
+  9.3 with the angle going negative.
+
 - **`partscheck.mts`** — can every part of the board actually be added and
   removed? For each kind on the shipped board: delete all of it, build the
   real world, step it 240 frames. For each palette entry: add one, build,

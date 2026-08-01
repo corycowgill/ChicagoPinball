@@ -109,6 +109,21 @@ export class Playfield {
   get playRight() { return this.resolved.frame.playRight; }
   get playCenter() { return this.resolved.frame.playCenter; }
 
+  /** A static descriptor by id, for presentation code that must place a
+   *  visual ON a physical body rather than beside it.
+   *
+   *  Renderer3D used to derive the soccer goalposts from `scoop.x - 17,
+   *  scoop.y ± 12` while the physics posts were authored separately in
+   *  default.ts. Two copies of one placement is the pattern that let the 3D
+   *  rails and the physics rails drift apart, and it meant a goal could be
+   *  moved in the layout and stay put on screen. */
+  postAt(id: string): { x: number; y: number; r: number } | null {
+    const s = this.resolved.layout.statics.find((d) => d.id === id);
+    return s && (s.kind === 'post' || s.kind === 'deco-post')
+      ? { x: s.x, y: s.y, r: s.r ?? 4 }
+      : null;
+  }
+
   /** Flipper geometry. Tip-to-tip gap ≈ 39 px — wider than the ball (22),
    *  so the centre drain is real, like an actual machine. */
   get flipperY() { return this.resolved.frame.flipperY; }
