@@ -10,9 +10,23 @@ export class DropTarget {
   readonly home: { x: number; y: number; angle: number };
   hit = false;
 
+  /** Plate size. Exposed so layout validation can treat a raised target as
+   *  the obstacle it is by reading the entity, instead of copying two more
+   *  literals that would drift. */
+  static readonly W = 28;
+  static readonly H = 12;
+
   /** `id` must be unique across the table (used as the physics label);
    *  `letter` is what's printed on the face and may repeat. */
-  constructor(id: string, letter: string, x: number, y: number, angle = 0, w = 28, h = 12) {
+  constructor(
+    id: string,
+    letter: string,
+    x: number,
+    y: number,
+    angle = 0,
+    w = DropTarget.W,
+    h = DropTarget.H,
+  ) {
     this.letter = letter;
     this.home = { x, y, angle };
     this.body = Matter.Bodies.rectangle(x, y, w, h, {

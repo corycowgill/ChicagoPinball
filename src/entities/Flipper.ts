@@ -31,11 +31,15 @@ export class Flipper {
   readonly len: number;
   readonly height: number;
   private active = false;
-  private restAngle: number;
+  /** Bat geometry at rest, and the hinge. Public for the same reason `len`
+   *  and `height` are: a caller that wants to know where the bat's face is
+   *  must not re-derive it from constants, because a re-derivation drifts.
+   *  src/dev/captivereach.ts places a ball on the bat with these. */
+  readonly restAngle: number;
+  readonly pivotX: number;
+  readonly pivotY: number;
   private activeAngle: number;
   private side: FlipperSide;
-  private pivotX: number;
-  private pivotY: number;
   /** Per-step rotation rate for kick / return. */
   private readonly kickStep = FLIPPER_KICK_VEL;
   private readonly returnStep = FLIPPER_RETURN_VEL;

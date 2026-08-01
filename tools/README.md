@@ -94,7 +94,17 @@ npx esbuild tools/validate.mts   --bundle --platform=node --format=esm --outfile
   editor calls on every drag.
 - **`rulecheck.mts`** — mutates the board once per rule and asserts that rule
   fires. A validator that cannot fail reads as coverage while providing none,
-  so the rules are held to the same standard as the oracles.
+  so the rules are held to the same standard as the oracles. It also runs a
+  set of mutations that must produce **silence**, because a rule that fires on
+  everything passes every positive case and is still worthless — specifically,
+  the one-way orbit gates must never be reported as blocking the lanes they
+  exist to serve.
+
+  Worth knowing what it did *not* catch: rulecheck was 13/13 green the whole
+  time the clearance rules were blind to rails, slingshots, deco posts,
+  standups and drop targets. Every case happened to mutate a body class the
+  rules could already see. One mutation per rule proves the rule can speak; it
+  says nothing about what the rule is looking at.
 - **`mirrorcheck.mts`** — proves the editor's mirror is exact, by reflecting
   the whole shipped board and checking three independent things: every body
   lands on its twin's reflection, every eject comes out mirrored, and the
@@ -109,6 +119,26 @@ npx esbuild tools/validate.mts   --bundle --platform=node --format=esm --outfile
   EXPRESS and a board with no risk on the sides. Prints the shipped board
   against a variant with the return gates removed, so both numbers sit side by
   side.
+- **`captivereach.mts`** — asks whether the captive ball can be HIT, in two
+  bands that answer two different questions. The *aperture* band releases
+  balls just below the mouth on a board with the mode scoop moved aside, so
+  the only thing in the way is the captive's own posts and lane walls; the
+  *flip* band cradles a ball on a real bat at eight strike points and swings
+  it. Prints a positive control — the same board with the stop posts deleted —
+  because a probe that reads zero on every input has measured nothing, which
+  is how every other instrument here started out.
+
+  It cost four corrections to its own harness, each of which produced a
+  confident wrong number first: releasing the ball inside the flipper bat (the
+  solver ate the velocity and it read "90% short" with a median closest
+  approach exactly equal to the starting distance); releasing it inside a
+  slingshot (which then kicked it at its own angle); an aperture band released
+  inside the mode scoop's capture circle, which reaches to within 26px of the
+  mouth so no clear band under it exists at all; and a stuck-detector checked
+  at four steps, by which time a legitimately fast trial has already bounced
+  off a post. The `stuck` and `blocked` fates exist so those failures show up
+  as harness faults rather than board faults.
+
 - **`ejectaudit.mts`** — fires every kicker described by the layout (both
   scoops, both ramp exits, the outlane kickback) as a deterministic fan of
   angle × speed variants, steps the **real engine**, and reports the fraction

@@ -16,6 +16,10 @@ export class StandupTarget {
   lit = false;
   private flash = 0;
 
+  /** Default plate size, read by layout validation rather than copied. */
+  static readonly W = 28;
+  static readonly H = 8;
+
   constructor(opts: {
     x: number;
     y: number;
@@ -25,8 +29,8 @@ export class StandupTarget {
     color?: string;
     id: string;
   }) {
-    this.w = opts.width ?? 28;
-    this.h = opts.height ?? 8;
+    this.w = opts.width ?? StandupTarget.W;
+    this.h = opts.height ?? StandupTarget.H;
     this.angle = opts.angle ?? 0;
     this.color = opts.color ?? COLOR.INSERT_YELLOW;
     this.label = `standup-${opts.id}`;

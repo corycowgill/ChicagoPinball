@@ -25,12 +25,34 @@ export class CaptiveBall {
   static readonly WALL_T = 6;
   static readonly OUTER_HALF = CaptiveBall.LANE_W / 2 + CaptiveBall.WALL_T;
 
+  /** The strike aperture, as three numbers instead of three literals buried in
+   *  the constructor: the stop posts' offset from the lane centre, their
+   *  radius, and how far above the mouth the captive hangs.
+   *
+   *  Deliberately NOT `readonly`, and that is the point. These three numbers
+   *  decide whether the captive is hittable at all, and the only honest way to
+   *  choose them is to sweep them and measure — src/dev/captivereach.ts does
+   *  that, rebuilding the world for each combination. A dev harness varying
+   *  them is the intended use; the game never writes them. */
+  /** Flush with the OUTER face of each lane wall (LANE_W/2 + WALL_T/2), so
+   *  the posts trim the mouth without narrowing it. At ±20/r5 they pinched
+   *  the opening to an 8px window for the ball's centre and the captive's own
+   *  geometry rejected a third of every strike that reached it. Measured with
+   *  tools/captivereach.mts, aperture band, 80 strikes: 63% -> 90%. */
+  static POST_DX = CaptiveBall.LANE_W / 2 + CaptiveBall.WALL_T / 2;
+  static POST_R = 4;
+  /** Captive centre height ABOVE the mouth plane when hanging at rest. Six,
+   *  not twelve: the captive's underside then sits just BELOW the mouth
+   *  plane, so a ball strikes it on arrival instead of having to travel up
+   *  into the lane first. Worth 5 points of make rate on its own. */
+  static REST_DY = 6;
+
   /** x,y = centre of the OPEN mouth at the bottom of the lane. */
   constructor(public readonly x: number, public readonly y: number) {
     const laneW = CaptiveBall.LANE_W; // inner width between the side walls
     const laneTop = y - 74;
     const anchorY = laneTop + 8;
-    const restY = y - 12; // captive centre when resting on the posts
+    const restY = y - CaptiveBall.REST_DY; // captive centre hanging at rest
 
     this.ball = Matter.Bodies.circle(x, restY, 10, {
       restitution: 0.4,
@@ -66,16 +88,20 @@ export class CaptiveBall {
         label: 'wall',
       }),
     );
-    // Stop posts at the mouth. The pinch must leave real clearance for the
-    // striking ball (r 11): at ±17/r6 the clearance was exactly 0 px and
-    // the solver absorbed every shot at the pinch — the captive was
-    // physically unhittable. ±20/r5 leaves 4 px a side; the tether (not
-    // the posts) is what keeps the captive in its lane.
-    const postR = 5;
-    this.posts = [
-      { x: x - 20, y, r: postR },
-      { x: x + 20, y, r: postR },
-    ];
+    // Stop posts at the mouth — decorative trim, not a pinch. The clearance
+    // they leave has been wrong twice: at ±17/r6 it was exactly 0px and the
+    // solver absorbed every shot; ±20/r5 left 4px a side, which sounds fine
+    // and still rejected 37% of strikes that reached the mouth. They now sit
+    // flush with the lane walls, so the mouth is as wide as the lane. The
+    // tether, not the posts, is what keeps the captive in its lane.
+    const postR = CaptiveBall.POST_R;
+    const postDx = CaptiveBall.POST_DX;
+    this.posts = postR > 0
+      ? [
+          { x: x - postDx, y, r: postR },
+          { x: x + postDx, y, r: postR },
+        ]
+      : [];
     for (const p of this.posts) {
       this.walls.push(
         Matter.Bodies.circle(p.x, p.y, p.r, { isStatic: true, label: 'wall' }),

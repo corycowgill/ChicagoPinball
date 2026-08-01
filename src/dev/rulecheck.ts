@@ -97,9 +97,59 @@ export const CASES: RuleCase[] = [
   },
   {
     rule: 'corridor-blocked',
-    what: 'the soccer leg pushed back into the captive approach',
+    what: 'a post dropped into the right orbit channel',
     mutate: mapStatic('soccer-post-s', (s) => {
-      s.x = 400;
+      s.x = 462;
+      s.y = 420;
+    }),
+  },
+  // The four cases below cover the obstacle classes the clearance rules used
+  // to be blind to. They are not hypothetical: the validator called this
+  // board clean while a RAIL sat 11.8px inside the left flipper's line to the
+  // captive, and while the right flipper's protected corridor to the captive
+  // ran through the right slingshot. Each class gets its own mutation,
+  // because "rails are handled" was believed for several rounds on the
+  // strength of a comment.
+  {
+    rule: 'corridor-blocked',
+    what: 'a plain RAIL laid across the left orbit channel',
+    mutate: (l) => {
+      const c = clone(l);
+      c.statics.push({
+        kind: 'rail',
+        id: 'blocker-rail',
+        a: { x: 4, y: 440 },
+        b: { x: 44, y: 440 },
+        thickness: 6,
+      });
+      return c;
+    },
+  },
+  {
+    rule: 'corridor-blocked',
+    what: 'a DECO POST dropped into the left orbit channel',
+    mutate: (l) => {
+      const c = clone(l);
+      c.statics.push({ kind: 'deco-post', id: 'blocker-deco', x: 20, y: 420, r: 5 });
+      return c;
+    },
+  },
+  {
+    rule: 'shot-line-blocked',
+    what: 'a SLINGSHOT stretched across the left flipper -> lake scoop line',
+    mutate: mapElement('sling-left', (e) => {
+      e.verts = [
+        { x: 84, y: 650 },
+        { x: 84, y: 720 },
+        { x: 180, y: 560 },
+      ];
+    }),
+  },
+  {
+    rule: 'shot-line-blocked',
+    what: 'a DROP TARGET slid onto the right flipper -> lake scoop line',
+    mutate: mapElement('chicago-bank', (e) => {
+      e.slots[0] = { x: 200, y: 640, angle: 0 };
     }),
   },
   {
@@ -120,10 +170,15 @@ export const CASES: RuleCase[] = [
     },
   },
   {
+    // Was "grow the centre pedestal by 12px", and that stopped working the
+    // moment the clearance rules learned to see the rest of the board: the
+    // pedestal is no longer the tightest thing on any line, so growing it
+    // changed no reported number. A narrowing case has to squeeze whatever is
+    // ALREADY worst, which here is the funnel post framing each ramp mouth.
     rule: 'shot-line-narrowed',
-    what: 'the centre pedestal grown 12px — every line past it tightens',
-    mutate: mapStatic('stadium-pedestal', (s) => {
-      s.r += 12;
+    what: 'the left ramp funnel post grown 2px — the tightest gate on the board',
+    mutate: mapStatic('funnel-l-post-a', (s) => {
+      s.r += 2;
     }),
   },
   {
@@ -169,6 +224,48 @@ export const CASES: RuleCase[] = [
   },
 ];
 
+/** A mutation that must produce SILENCE.
+ *
+ *  Every case above asserts a rule speaks. This asserts one does not, and the
+ *  distinction matters more than it sounds: a rule that fires on everything
+ *  passes all of the above and is still worthless. The specific risk here is
+ *  the one-way gate exemption — corridors and shot lines describe travel UP
+ *  the board and a gate is open to a climbing ball, so the two orbit return
+ *  gates must not be reported as blocking the lanes they exist to serve. The
+ *  physical version of that mistake cost 8/12 orbit entries; make the same
+ *  mistake in the rules and the next author "fixes" the gates back out. */
+export interface SilentCase {
+  rule: string;
+  what: string;
+  mutate: Mutate;
+}
+
+export const SILENT_CASES: SilentCase[] = [
+  {
+    rule: 'corridor-blocked',
+    what: 'the return GATES, which are one-way and sit beside the orbit channels',
+    // Identity: the shipped gates already lie against the loop corridors.
+    // If the exemption is ever dropped, this fires and the case fails.
+    mutate: (l) => clone(l),
+  },
+  {
+    rule: 'corridor-blocked',
+    what: 'a one-way gate laid straight ACROSS the left orbit channel',
+    mutate: (l) => {
+      const c = clone(l);
+      c.statics.push({
+        kind: 'rail',
+        id: 'gate-across',
+        a: { x: 4, y: 440 },
+        b: { x: 44, y: 440 },
+        thickness: 6,
+        oneWay: 'down',
+      });
+      return c;
+    },
+  },
+];
+
 export interface CaseResult {
   rule: string;
   what: string;
@@ -185,6 +282,17 @@ export function runRuleChecks(): CaseResult[] {
       ...validateLayout(resolveLayout(mutated)),
       ...validateRules(mutated),
     ].map((d) => d.rule);
+    return { rule: c.rule, what: c.what, fired: got.includes(c.rule), got: [...new Set(got)] };
+  });
+}
+
+/** The silent cases, run the same way. `fired` true here is a FAILURE. */
+export function runSilentChecks(): CaseResult[] {
+  return SILENT_CASES.map((c) => {
+    const mutated = c.mutate(DEFAULT_LAYOUT);
+    const got = [...validateLayout(resolveLayout(mutated)), ...validateRules(mutated)].map(
+      (d) => d.rule,
+    );
     return { rule: c.rule, what: c.what, fired: got.includes(c.rule), got: [...new Set(got)] };
   });
 }
