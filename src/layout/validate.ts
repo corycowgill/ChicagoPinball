@@ -243,8 +243,10 @@ function targetPoint(resolved: ResolvedLayout, id: string): Pt | null {
       return { x: e.x, y: e.y };
     case 'sensor':
       // An orbit is shot at its lane MOUTH, low on the board; its sensor sits
-      // mid-channel at y=340. Aiming at the sensor would draw a line straight
-      // across the middle of the playfield, which is not the shot.
+      // well up the channel. Aiming at the sensor would draw a line straight
+      // across the middle of the playfield, which is not the shot. Read from
+      // the mouth deliberately, so moving the switch up or down the lane does
+      // not silently redefine every orbit shot line.
       if (e.role === 'left-loop' || e.role === 'right-loop') return { x: e.x, y: 590 };
       return { x: e.x, y: e.y };
     default:

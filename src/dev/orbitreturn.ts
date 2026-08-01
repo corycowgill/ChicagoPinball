@@ -40,7 +40,11 @@ type Fate =
 
 const DT = 1000 / 60;
 const MAX_STEPS = 600;
-/** Where the lane is when it is still a lane, above anything that steers. */
+/** Where the lane is when it is still a lane, above anything that steers.
+ *  Deliberately NOT the loop switch's height — this probe asks where a ball
+ *  coming DOWN the lane ends up, which is a different question from where the
+ *  switch that scores the climb should sit. The two were the same number
+ *  until the switch moved down to 420. */
 const RELEASE_Y = 340;
 /** Sideways drift at release. A ball leaving an orbit is not falling
  *  perfectly straight, and a guide that only works for a plumb drop works for
