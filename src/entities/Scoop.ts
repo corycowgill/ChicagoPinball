@@ -7,6 +7,11 @@ import { insertArrow, softShadow } from '../Graphics';
  *  shape is a metal-trimmed half-pipe with a glowing arrow above it. */
 export class Scoop {
   readonly sensor: Matter.Body;
+
+  /** Capture radius. Exposed so layout validation can see the scoop as the
+   *  obstacle it functionally is — a ball entering this circle is taken out
+   *  of flight — by reading the entity instead of copying the number. */
+  static readonly SENSOR_R = 14;
   /** When the ball is held inside, this is its body — for visual purposes we
    *  draw a "captured" indicator. */
   private captured: Matter.Body | null = null;
@@ -28,7 +33,7 @@ export class Scoop {
   ) {
     this.kickAngle = kickAngle;
     this.kickSpeed = kickSpeed;
-    this.sensor = Matter.Bodies.circle(x, y, 14, {
+    this.sensor = Matter.Bodies.circle(x, y, Scoop.SENSOR_R, {
       isStatic: true,
       isSensor: true,
       label,

@@ -303,15 +303,19 @@ export const DEFAULT_LAYOUT: PlayfieldLayout = {
   // captive-lane approach corridor (x >= ~389) must stay clear", but that
   // arithmetic omits the ball's own 11 px radius, so a 2.5 px post at 383
   // actually excludes the ball's centre out to x=396.5.
+  //
+  // A SECOND one has now been deleted outright rather than fixed. There used
+  // to be a `captive-approach` corridor from the right flipper to the captive
+  // mouth, and the right flipper cannot take that shot: its line runs through
+  // its OWN slingshot. Once slingshots became visible to validation the
+  // corridor reported six blockers at once — the slingshot's three edges, its
+  // post, the inlane return rail and the mode scoop — none of which is
+  // movable, because between them they ARE the bottom right of the board.
+  // src/dev/captivereach.ts says the same thing from the physics side: a real
+  // flip from the right bat is blocked at the bat itself on 8 trials of 8.
+  // A protected corridor for a shot that does not exist is worse than no
+  // corridor: it reserves space and certifies a fiction.
   corridors: [
-    {
-      id: 'captive-approach',
-      a: { x: PLAY_CENTER + 118, y: PLAYFIELD_H - 200 },
-      b: { x: 420, y: 494 },
-      width: 30,
-      note: 'right flipper to the captive mouth',
-      target: 'captive',
-    },
     {
       id: 'loop-channel-left',
       a: { x: 20, y: 548 },
@@ -335,29 +339,51 @@ export const DEFAULT_LAYOUT: PlayfieldLayout = {
   // otherwise a shot clearing by 122 px could be walked down to 1 px and
   // nothing would complain.
   //
-  // Two lines start negative and both are real, known defects rather than
-  // measurement noise: the soccer legs sit across the left flipper's lines to
-  // the captive and to the mode scoop. The captive figure (-10) independently
-  // reproduces a blocker found by hand from a completely different direction,
-  // and the captive is the shot that measured 0 makes in 25 strike points.
+  // EVERY NUMBER BELOW CHANGED IN ONE ROUND, and the old ones were fiction.
+  // The clearance rules used to test a line against circles only — seven
+  // posts, three pop bumpers, the Bean, the captive: twelve bodies out of the
+  // fifty-seven this board places. Rails, deco posts, slingshots, standups
+  // and drop targets were invisible, so a "122px clear" shot was 122px clear
+  // of a fifth of the board. See src/layout/validate.ts. Two consequences
+  // are visible right here:
+  //
+  //   - the ramp lines fell from 71/39/10 to 3, because the funnel POSTS
+  //     that frame each ramp mouth are on them. That is the funnel doing its
+  //     job — it is meant to be a tight gate — but nothing measured it before.
+  //   - every loop line went negative against a slingshot, and those shots
+  //     are made 90% of the time (tools/shotodds.mjs). A shot line is a
+  //     straight-line CLEARANCE heuristic, not a trajectory: a real flipper
+  //     shot leaves the bat tangentially and curves round its own slingshot.
+  //     Read a negative baseline as "this line is obstructed", never as "this
+  //     shot is impossible" — the physics probes answer that question, not
+  //     this table.
+  //
+  // Lines are measured from where the ball actually sits — cradled on the bat
+  // — not from the hinge. Measuring from the hinge put the first point of
+  // every line inside the flipper's own slingshot and produced a uniform
+  // -11.0px, which is the ball's radius and therefore a tell.
   //
   // The Bean has no shot line: it sits behind the pop nest by design and is
   // reached THROUGH the nest, so a straight line from a flipper measures
   // nothing meaningful.
   shotLines: [
-    { id: 'L->ramp-left', from: 'left-flipper', to: 'ramp-left', baselineClearance: 71, minClearance: 0 },
-    { id: 'L->ramp-right', from: 'left-flipper', to: 'ramp-right', baselineClearance: 10, minClearance: 0 },
-    { id: 'L->scoop-lake', from: 'left-flipper', to: 'scoop-lake', baselineClearance: 122, minClearance: 0 },
-    { id: 'L->scoop-mode', from: 'left-flipper', to: 'scoop-mode', baselineClearance: -13, minClearance: -13 },
-    { id: 'L->captive', from: 'left-flipper', to: 'captive', baselineClearance: -10, minClearance: -10 },
-    { id: 'L->left-loop', from: 'left-flipper', to: 'left-loop', baselineClearance: 160, minClearance: 0 },
-    { id: 'L->right-loop', from: 'left-flipper', to: 'right-loop', baselineClearance: 51, minClearance: 0 },
-    { id: 'R->ramp-left', from: 'right-flipper', to: 'ramp-left', baselineClearance: 10, minClearance: 0 },
-    { id: 'R->ramp-right', from: 'right-flipper', to: 'ramp-right', baselineClearance: 39, minClearance: 0 },
-    { id: 'R->scoop-lake', from: 'right-flipper', to: 'scoop-lake', baselineClearance: 29, minClearance: 0 },
-    { id: 'R->scoop-mode', from: 'right-flipper', to: 'scoop-mode', baselineClearance: 0, minClearance: 0 },
-    { id: 'R->captive', from: 'right-flipper', to: 'captive', baselineClearance: 8, minClearance: 0 },
-    { id: 'R->left-loop', from: 'right-flipper', to: 'left-loop', baselineClearance: 66, minClearance: 0 },
-    { id: 'R->right-loop', from: 'right-flipper', to: 'right-loop', baselineClearance: 67, minClearance: 0 },
+    { id: 'L->ramp-left', from: 'left-flipper', to: 'ramp-left', baselineClearance: 3, minClearance: 0 },
+    { id: 'L->ramp-right', from: 'left-flipper', to: 'ramp-right', baselineClearance: 3, minClearance: 0 },
+    { id: 'L->scoop-lake', from: 'left-flipper', to: 'scoop-lake', baselineClearance: 17, minClearance: 0 },
+    { id: 'L->scoop-mode', from: 'left-flipper', to: 'scoop-mode', baselineClearance: -9, minClearance: -9 },
+    { id: 'L->captive', from: 'left-flipper', to: 'captive', baselineClearance: -11, minClearance: -11 },
+    { id: 'L->left-loop', from: 'left-flipper', to: 'left-loop', baselineClearance: -11, minClearance: -11 },
+    { id: 'L->right-loop', from: 'left-flipper', to: 'right-loop', baselineClearance: -12, minClearance: -12 },
+    { id: 'R->ramp-left', from: 'right-flipper', to: 'ramp-left', baselineClearance: 3, minClearance: 0 },
+    { id: 'R->ramp-right', from: 'right-flipper', to: 'ramp-right', baselineClearance: 3, minClearance: 0 },
+    { id: 'R->scoop-lake', from: 'right-flipper', to: 'scoop-lake', baselineClearance: 13, minClearance: 0 },
+    { id: 'R->scoop-mode', from: 'right-flipper', to: 'scoop-mode', baselineClearance: -5, minClearance: -5 },
+    // The right flipper's line to the captive is blocked by the mode scoop's
+    // capture circle and, before that, by the right slingshot itself. Kept
+    // rather than deleted so the fact is recorded and any edit that changes
+    // it is reported.
+    { id: 'R->captive', from: 'right-flipper', to: 'captive', baselineClearance: -19, minClearance: -19 },
+    { id: 'R->left-loop', from: 'right-flipper', to: 'left-loop', baselineClearance: -11, minClearance: -11 },
+    { id: 'R->right-loop', from: 'right-flipper', to: 'right-loop', baselineClearance: -11, minClearance: -11 },
   ],
 };

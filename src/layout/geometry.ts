@@ -26,6 +26,44 @@ export function segmentClearance(a: Pt, b: Pt, c: Pt, bodyR: number, ballR: numb
   return pointToSegment(c, a, b) - bodyR - ballR;
 }
 
+/** Closest distance between two SEGMENTS.
+ *
+ *  The primitive the clearance rules were missing. Without it the only
+ *  obstacle a shot line could be tested against was a circle, so every rail,
+ *  slingshot, standup and drop target on the board was invisible to
+ *  validation — 45 of the 57 solid bodies, including the funnel rail that
+ *  turned out to be sitting on the captive shot.
+ *
+ *  Segments, not lines: a rail that ends before it reaches the shot is not in
+ *  the way, and treating it as infinite would invent blockers.
+ */
+export function segmentToSegment(a1: Pt, b1: Pt, a2: Pt, b2: Pt): number {
+  // Four endpoint-to-segment distances bound the answer for every
+  // non-crossing configuration; crossing segments are the one case they miss,
+  // so test that separately and return 0.
+  if (segmentsCross(a1, b1, a2, b2)) return 0;
+  return Math.min(
+    pointToSegment(a1, a2, b2),
+    pointToSegment(b1, a2, b2),
+    pointToSegment(a2, a1, b1),
+    pointToSegment(b2, a1, b1),
+  );
+}
+
+function cross(o: Pt, a: Pt, b: Pt): number {
+  return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+
+/** Proper segment intersection. Collinear-overlap cases fall through to the
+ *  endpoint distances above, which return 0 for them anyway. */
+function segmentsCross(a1: Pt, b1: Pt, a2: Pt, b2: Pt): boolean {
+  const d1 = cross(a2, b2, a1);
+  const d2 = cross(a2, b2, b1);
+  const d3 = cross(a1, b1, a2);
+  const d4 = cross(a1, b1, b2);
+  return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+}
+
 /** Does a circle overlap a corridor (a thick segment)? Used for no-build
  *  zones — the captive approach, the loop channels, the inlanes. */
 export function overlapsCorridor(
