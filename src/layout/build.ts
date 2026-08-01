@@ -52,6 +52,8 @@ export interface PlayfieldParts {
   walls: WallDef[];
   postPositions: { x: number; y: number; r?: number }[];
   drainSensor: Matter.Body;
+  /** One-way gates, for Playfield to open and close each step. */
+  gates: Matter.Body[];
 }
 
 export function norm(v: Pt): Pt {
@@ -94,6 +96,7 @@ export function buildPlayfield(
 ): PlayfieldParts {
   const { frame, layout } = resolved;
   const walls: WallDef[] = [];
+  const gates: Matter.Body[] = [];
   const postPositions: { x: number; y: number; r?: number }[] = [];
 
   const addWall = (body: Matter.Body, kind: WallDef['kind'] = 'rail') => {
@@ -127,9 +130,12 @@ export function buildPlayfield(
         walls.push({ body, outline: [], kind: 'wood' });
         break;
       }
-      case 'rail':
-        addWall(railBody(s.a, s.b, s.thickness), s.skin ?? 'rail');
+      case 'rail': {
+        const body = railBody(s.a, s.b, s.thickness);
+        addWall(body, s.skin ?? 'rail');
+        if (s.oneWay) gates.push(body);
         break;
+      }
       case 'post':
         addWall(
           Matter.Bodies.circle(s.x, s.y, s.r, {
@@ -299,5 +305,5 @@ export function buildPlayfield(
     endItem(e.id);
   }
 
-  return { ...(parts as PlayfieldParts), walls, postPositions };
+  return { ...(parts as PlayfieldParts), walls, gates, postPositions };
 }

@@ -75,7 +75,23 @@ export type StaticDesc =
    *  radius is `min(3, thickness/2 - 0.1)` — a formula, not a constant,
    *  because it changes the vertex count with thickness and therefore
    *  changes contact behaviour. */
-  | { kind: 'rail'; id: ElementId; a: Pt; b: Pt; thickness: number; skin?: WallSkin }
+  | {
+      kind: 'rail';
+      id: ElementId;
+      a: Pt;
+      b: Pt;
+      thickness: number;
+      skin?: WallSkin;
+      /** A ONE-WAY GATE: solid to balls falling, open to balls climbing.
+       *
+       *  An orbit lane is used in both directions — the shot goes up it and
+       *  the return comes down it — so a plain rail across one blocks the
+       *  shot as surely as it steers the return. Measured: a static guide took
+       *  orbit returns from 76% into an outlane to 0%, and took orbit ENTRY
+       *  from 8/12 to 0/12. A gate is the real part for this, and it is held
+       *  open by any ball climbing near it, exactly as a physical one is. */
+      oneWay?: 'down';
+    }
   /** A PHYSICAL circular post (pedestal, attraction legs, goal posts). */
   | { kind: 'post'; id: ElementId; x: number; y: number; r: number; restitution?: number; skin?: WallSkin }
   /** Render-list only — NO body. Distinct from 'post' because today the only

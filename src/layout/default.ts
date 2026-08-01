@@ -28,7 +28,7 @@ const LAUNCH_X = (LANE_INNER_X + (PLAYFIELD_W - 8)) / 2; // 506
 
 // Bottom geometry: wall | outlane | rail(42) | inlane | slingshot(84+)
 const RAIL_X = 42;
-const RAIL_TOP = 608;
+const RAIL_TOP = 688;
 const RAIL_BOT = 740;
 const R_RAIL_X = PLAY_RIGHT - RAIL_X; // 438
 
@@ -64,6 +64,35 @@ const statics: StaticDesc[] = [
   { kind: 'rail', id: 'inlane-return-l', a: { x: RAIL_X, y: RAIL_BOT }, b: { x: 104, y: 750 }, thickness: 6 },
   { kind: 'rail', id: 'outlane-rail-r', a: { x: R_RAIL_X, y: RAIL_TOP }, b: { x: R_RAIL_X, y: RAIL_BOT }, thickness: 6 },
   { kind: 'rail', id: 'inlane-return-r', a: { x: R_RAIL_X, y: RAIL_BOT }, b: { x: PLAY_RIGHT - 104, y: 750 }, thickness: 6 },
+
+  // Orbit return GATES — one-way, and they have to be. Both orbit lanes used
+  // to run straight down into the
+  // outlanes: measured with tools/orbitreturn.mts, 64% of left-orbit returns
+  // and 76% of right-orbit returns ended past every flipper. The orbits score
+  // loops, light the 2x/3x playfield and start two of the five sports modes,
+  // so the board was punishing you for making them. These carry the
+  // descending ball inboard, over the divider, onto the flipper: 100% and 100%.
+  //
+  // As plain rails they also blocked the SHOT. A lane is used both ways — the
+  // orbit is shot up the same channel its return comes down — and a static
+  // guide across it took orbit entry from 8/12 to 0/12, which would have
+  // killed two of the five sports modes. They are one-way gates: solid to a
+  // falling ball, open to a climbing one.
+  //
+  // A guide alone was not enough, and the measurement said so: it roofed the
+  // outlane, which then had NO feed at all (0/40 reachable) and made the
+  // kickback fire into a sealed pocket. An outlane nothing can enter is a dead
+  // kickback, a dead EL EXPRESS and a board with no risk on the sides.
+  //
+  // The outlane's mouth is the gap between a gate's inboard end and the top of
+  // its divider, and it has to admit a 22px ball with room to cross. At the
+  // old positions that gap was 18px and the outlanes were unreachable — 0/64
+  // — which is a dead kickback, a dead EL EXPRESS and no risk on the sides.
+  // Ending the gates at x=76 and dropping RAIL_TOP from 608 to 688 opens it:
+  // orbit returns still reach a flipper 100% of the time, and the outlanes are
+  // reachable on 23% of the probe, up from 13% on the old board.
+  { kind: 'rail', id: 'return-guide-l', a: { x: 6, y: 560 }, b: { x: 76, y: 600 }, thickness: 6, oneWay: 'down' },
+  { kind: 'rail', id: 'return-guide-r', a: { x: PLAY_RIGHT - 6, y: 560 }, b: { x: PLAY_RIGHT - 76, y: 600 }, thickness: 6, oneWay: 'down' },
 
   { kind: 'deco-post', id: 'lane-mouth-l', x: RAIL_X, y: RAIL_TOP - 8, r: 5 },
   { kind: 'deco-post', id: 'lane-mouth-r', x: R_RAIL_X, y: RAIL_TOP - 8, r: 5 },
@@ -193,7 +222,12 @@ export const DEFAULT_LAYOUT: PlayfieldLayout = {
         { x: 434, y: 618 },
         { x: 417, y: 640 },
       ],
-      exitVel: { x: 0.4, y: 6 },
+      // Aimed INBOARD. Both ramp exits used to point at their own outlane,
+      // which was harmless while the divider reached up to y=608 and blocked
+      // the drift. With the divider shortened to open the outlane's mouth, the
+      // right ramp started feeding the left outlane on 40% of the eject
+      // audit's fan — the ramp's reward became a drain.
+      exitVel: { x: -0.8, y: 6 },
       color: COLOR.INSERT_AMBER,
       arrowAngle: -Math.PI / 2 - 0.45,
       themeText: 'WILLIS',
@@ -223,8 +257,9 @@ export const DEFAULT_LAYOUT: PlayfieldLayout = {
         { x: 63, y: 640 },
       ],
       // y 8 rather than 6: enough punch to push through the spinner blade in
-      // the left inlane instead of stalling on it.
-      exitVel: { x: -0.4, y: 8 },
+      // the left inlane instead of stalling on it. x aimed inboard — see the
+      // left ramp above.
+      exitVel: { x: 0.8, y: 8 },
       color: COLOR.INSERT_CYAN,
       arrowAngle: -Math.PI / 2 + 0.45,
       themeText: 'CTA',
@@ -242,23 +277,17 @@ export const DEFAULT_LAYOUT: PlayfieldLayout = {
     { kind: 'captive', id: 'captive', x: 420, y: 494 },
     { kind: 'spinner', id: 'spinner', cx: 63, cy: 678, length: 34 },
 
-    // KNOWN DEFECT, found by tools/ejectaudit.mts: this kickback returns the
-    // ball to its own outlane on 73% of its fan. It is not the impulse — a
-    // sweep of vx 0.4..1.6 x vy -21..-40 could not get below 40%, and neither
-    // could moving the kicker up the lane. The left channel above the outlane
-    // is an open vertical corridor bounded by the cabinet wall, so whatever
-    // goes up it comes back down it.
+    // The kickback fires OUT, not UP. Firing up the lane was the old design and
+    // it returned the ball to this same outlane on 73% of its fan — the lane
+    // was a blind vertical corridor, and adding the return guide above it made
+    // that worse, not better (93%): now the lane has a roof.
     //
-    // The GEOMETRY is still unfixed and still needs a lower-left redesign.
-    // What changed is the rules side: Game.handleLeftOutlane keeps the award
-    // lit across the bounce-backs instead of spending it on the first failed
-    // attempt, which took the measured save rate from 0/10 to 9/10.
-    //
-    // Two instruments to hold a geometry change to, and they answer different
-    // questions: tools/ejectaudit.mts says where one eject goes, and
-    // tools/kickback.mjs says whether the feature works. A redesign should
-    // move the audit's 73% down — the retry logic cannot, and does not.
-    { kind: 'sensor', id: 'left-outlane', role: 'left-outlane', x: 21, y: 884, w: 38, h: 10, kicker: { vx: 0.6, vy: -21, riseY: -6 } },
+    // What made a sideways kick possible is the shortened divider. It spans
+    // y 632..740, so below 740 the outlane and the inlane are already one
+    // space, and a ball punched right at the bottom of the lane crosses into
+    // the flipper zone instead of climbing into a dead end. Measured over the
+    // audit's 15-trial fan: 73% into the outlane before, 0% now.
+    { kind: 'sensor', id: 'left-outlane', role: 'left-outlane', x: 21, y: 884, w: 38, h: 10, kicker: { vx: 6, vy: -18, riseY: -6 } },
     { kind: 'sensor', id: 'inlane-left', role: 'inlane-left', x: 63, y: 712, w: 34, h: 12 },
     { kind: 'sensor', id: 'inlane-right', role: 'inlane-right', x: PLAY_RIGHT - 63, y: 712, w: 34, h: 12 },
     { kind: 'sensor', id: 'right-outlane', role: 'right-outlane', x: 459, y: 884, w: 38, h: 10 },
@@ -285,17 +314,17 @@ export const DEFAULT_LAYOUT: PlayfieldLayout = {
     },
     {
       id: 'loop-channel-left',
-      a: { x: 20, y: 590 },
+      a: { x: 20, y: 548 },
       b: { x: 20, y: 340 },
       width: 30,
-      note: 'left orbit lane',
+      note: 'left orbit lane, down to the return guide',
     },
     {
       id: 'loop-channel-right',
-      a: { x: 462, y: 590 },
+      a: { x: 462, y: 548 },
       b: { x: 462, y: 340 },
       width: 30,
-      note: 'right orbit lane',
+      note: 'right orbit lane, down to the return guide',
     },
   ],
 

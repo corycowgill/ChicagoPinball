@@ -102,6 +102,13 @@ npx esbuild tools/validate.mts   --bundle --platform=node --format=esm --outfile
   what does *not* work here: mirroring twice and comparing. A field the mirror
   forgets is unchanged by both flips, so the round trip passes precisely when
   the bug is present.
+- **`orbitreturn.mts`** — releases balls down each orbit lane and asks where
+  they cross the flipper line: within a bat's reach, or past it. Also asks
+  whether the outlanes can still be REACHED, which is the other half of the
+  question — an outlane nothing can enter is a dead kickback, a dead EL
+  EXPRESS and a board with no risk on the sides. Prints the shipped board
+  against a variant with the return gates removed, so both numbers sit side by
+  side.
 - **`ejectaudit.mts`** — fires every kicker described by the layout (both
   scoops, both ramp exits, the outlane kickback) as a deterministic fan of
   angle × speed variants, steps the **real engine**, and reports the fraction
@@ -190,6 +197,14 @@ The one thing makerate does support: a shot reading 0 across *many* runs is
 genuinely dead. The captive has read 0 in every run of every measurement.
 
 ## kickback.mjs — does the outlane save actually save?
+
+It reports two numbers, and mixing them up cost a wrong conclusion once.
+**"Left the outlane and stayed out"** is the kicker's own job. **"Still in
+play after the window"** is nearly always 0 with nobody at the flippers, so it
+cannot be the pass criterion alone — using only it scored a kicker that
+repeatedly re-fired a ball *inside* the outlane higher than one that punched
+it out to the flipper first time.
+
 
 The eject audit says where one eject *goes*. This says whether the *feature*
 works: it fires the kickback for real, lets the real game loop handle whatever
