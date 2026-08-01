@@ -22,7 +22,7 @@ import { ChicagoBank } from '../entities/ChicagoBank';
 import { Rollover } from '../entities/Rollover';
 import { StandupTarget } from '../entities/StandupTarget';
 import { Ramp } from '../entities/Ramp';
-import { ResolvedLayout } from './resolve';
+import { ResolvedFrame, ResolvedLayout } from './resolve';
 import { Pt, StaticDesc } from './types';
 
 export interface WallDef {
@@ -305,5 +305,78 @@ export function buildPlayfield(
     endItem(e.id);
   }
 
-  return { ...(parts as PlayfieldParts), walls, gates, postPositions };
+  return { ...standIns(parts, frame), walls, gates, postPositions };
+}
+
+/** Somewhere no ball will ever be, and nothing will ever be drawn. */
+const OFFSTAGE = { x: -4000, y: -4000 };
+
+/** Fill in every singleton the board did not describe, WITHOUT adding a
+ *  single body to the world.
+ *
+ *  This is what makes the layout editor's delete button mean something. Every
+ *  field on `PlayfieldParts` is non-optional and `Playfield`, `Renderer` and
+ *  `Renderer3D` dereference them unconditionally across some sixty call
+ *  sites: `pf.captive.draw(ctx)`, `pf.bean.cx`, `pf.bank.litMask()`. So
+ *  deleting the captive did not produce a board without a captive, it
+ *  produced a TypeError on the first frame — and because the editor draws by
+ *  building the real world, it took the editor down with it. The palette's
+ *  `requiredReason` existed to forbid exactly that, which meant ten of the
+ *  nineteen element kinds could never be removed.
+ *
+ *  The alternative was to make every field optional and guard sixty call
+ *  sites, which is a large diff through two renderers for no gain: a
+ *  stand-in parked four thousand pixels off the table, holding no bodies in
+ *  the world, is invisible, inert and costs nothing. The feature is simply
+ *  not there — which is what the author asked for by deleting it.
+ *
+ *  Absence is not silent. `validateLayout` reports what is missing, and for
+ *  the four parts that are the MACHINE rather than a feature — both flippers,
+ *  the plunger, the ball spawn, the drain — it reports an error, because a
+ *  board without them is not a hard board, it is one that cannot be played.
+ */
+function standIns(parts: Partial<PlayfieldParts>, frame: ResolvedFrame): PlayfieldParts {
+  const p = parts as PlayfieldParts;
+  if (!p.leftFlipper) p.leftFlipper = new Flipper('left', OFFSTAGE.x, OFFSTAGE.y);
+  if (!p.rightFlipper) p.rightFlipper = new Flipper('right', OFFSTAGE.x, OFFSTAGE.y);
+  if (!p.plunger) p.plunger = new Plunger(OFFSTAGE.x, OFFSTAGE.y, frame.plungerWidth);
+  if (!p.bean) p.bean = new Bean(OFFSTAGE.x, OFFSTAGE.y, 20);
+  if (!p.spinner) p.spinner = new Spinner(OFFSTAGE.x, OFFSTAGE.y, 34);
+  if (!p.captive) p.captive = new CaptiveBall(OFFSTAGE.x, OFFSTAGE.y);
+  if (!p.leftRamp) p.leftRamp = offstageRamp('left-ramp');
+  if (!p.rightRamp) p.rightRamp = offstageRamp('right-ramp');
+  if (!p.cityTourScoop) p.cityTourScoop = new Scoop(OFFSTAGE.x, OFFSTAGE.y, 0, 0, 'scoop');
+  if (!p.lakeMichiganScoop) {
+    p.lakeMichiganScoop = new Scoop(OFFSTAGE.x, OFFSTAGE.y, 0, 0, 'lake-scoop');
+  }
+  if (!p.bank) {
+    // ChicagoBank takes a Physics and adds its targets to the world, so the
+    // stand-in gets a throwaway world of its own rather than a real one.
+    p.bank = new ChicagoBank(
+      new Physics(),
+      Array.from({ length: 7 }, (_, i) => ({ x: OFFSTAGE.x + i * 30, y: OFFSTAGE.y, angle: 0 })),
+    );
+  }
+  if (!p.drainSensor) {
+    p.drainSensor = Matter.Bodies.rectangle(OFFSTAGE.x, OFFSTAGE.y, 10, 10, {
+      isStatic: true,
+      isSensor: true,
+      label: 'drain',
+    });
+  }
+  return p;
+}
+
+function offstageRamp(label: string): Ramp {
+  const a = { x: OFFSTAGE.x, y: OFFSTAGE.y };
+  const b = { x: OFFSTAGE.x, y: OFFSTAGE.y - 40 };
+  return new Ramp({
+    plate: [a, b],
+    habitrail: [b, { x: OFFSTAGE.x, y: OFFSTAGE.y - 80 }],
+    exitVel: { x: 0, y: 0 },
+    color: '#000000',
+    arrowAngle: 0,
+    label,
+    themeText: '',
+  });
 }

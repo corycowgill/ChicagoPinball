@@ -357,6 +357,83 @@ export function validateLayout(resolved: ResolvedLayout): Diagnostic[] {
     }
   }
 
+  // ── The machine ──────────────────────────────────────────────────────────
+  // Deleting these used to be refused outright, because a missing part threw
+  // rather than removed a feature. `standIns()` in build.ts fixed that, so
+  // the editor now allows it — which makes reporting it this rule's job. A
+  // board with no Bean is a board without multiball; a board with no drain is
+  // one that waits forever on a ball it can never see.
+  const MACHINE: { what: string; has: () => boolean; why: string }[] = [
+    {
+      what: 'left flipper',
+      has: () => layout.elements.some((e) => e.kind === 'flipper' && e.side === 'left'),
+      why: 'nothing can return a ball up the left side',
+    },
+    {
+      what: 'right flipper',
+      has: () => layout.elements.some((e) => e.kind === 'flipper' && e.side === 'right'),
+      why: 'nothing can return a ball up the right side',
+    },
+    {
+      what: 'plunger',
+      has: () => layout.elements.some((e) => e.kind === 'plunger'),
+      why: 'nothing puts a ball on the board',
+    },
+    {
+      what: 'ball spawn',
+      has: () => layout.elements.some((e) => e.kind === 'ball-spawn'),
+      why: 'there is no ball, and resetBall() has nothing to place',
+    },
+  ];
+  for (const m of MACHINE) {
+    if (!m.has()) {
+      push({
+        severity: 'error',
+        rule: 'machine-missing',
+        message: `no ${m.what} — ${m.why}. The board builds, but it cannot be played.`,
+        elementIds: [],
+      });
+    }
+  }
+
+  // Two ramps and two scoops are addressed BY LABEL, and the loader keeps one
+  // slot per label: a third ramp labelled 'left-ramp' silently replaces the
+  // first, with no error anywhere. The palette can now add ramps and scoops,
+  // so this became reachable the moment it became possible.
+  for (const [kind, labels] of [
+    ['ramp', ['left-ramp', 'right-ramp']],
+    ['scoop', ['scoop', 'lake-scoop']],
+  ] as const) {
+    for (const label of labels) {
+      const ids = layout.elements
+        .filter((e) => e.kind === kind && (e as { label: string }).label === label)
+        .map((e) => e.id);
+      if (ids.length > 1) {
+        push({
+          severity: 'error',
+          rule: 'duplicate-part',
+          message: `${ids.length} ${kind}s labelled '${label}' — the loader keeps one slot per label, so all but the last are built and then ignored`,
+          elementIds: ids,
+          measured: ids.length,
+          expected: 1,
+        });
+      }
+    }
+  }
+  for (const side of ['left', 'right'] as const) {
+    const ids = layout.elements.filter((e) => e.kind === 'flipper' && e.side === side).map((e) => e.id);
+    if (ids.length > 1) {
+      push({
+        severity: 'error',
+        rule: 'duplicate-part',
+        message: `${ids.length} ${side} flippers — both are built at the same pivot and fight each other`,
+        elementIds: ids,
+        measured: ids.length,
+        expected: 1,
+      });
+    }
+  }
+
   const bank = layout.elements.find((e) => e.kind === 'drop-bank');
   if (bank && bank.kind === 'drop-bank' && bank.slots.length !== 7) {
     push({
