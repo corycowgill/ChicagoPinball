@@ -17,7 +17,17 @@ is also a **BUILD LAYOUT** button in the page's top-right corner, which is the
 only way in without abandoning a game in progress, and `?edit` in the URL.
 
 - drag anything; handles resize circles, bend polylines and aim rails
-- the palette adds posts, rails, bumpers, targets, scoops, spinners, sensors
+- the palette has **all nineteen** kinds a board is made of — posts, rails,
+  bumpers, targets, rollovers, scoops, spinners, sensors, ramps, slingshots,
+  the captive, the Bean, the drop bank, both flippers, the plunger, the ball
+  spawn and the drain
+- **anything can be deleted.** Ten kinds used to be refused, because
+  `PlayfieldParts` has no optional fields and deleting one produced a
+  TypeError instead of a board without that feature. `standIns()` in
+  `src/layout/build.ts` fixed the cause: a missing part is built off-table
+  with no bodies in the world, so absence is absence. Deleting now tells you
+  what it cost you and lets you do it — which is what "warn me, but let me
+  build anyway" meant
 - two rule sets run on every edit and list what they find; clicking a
   diagnostic selects the offender:
   - `src/layout/validate.ts` — geometry: clearances, corridors, flipper sweep,
@@ -119,6 +129,22 @@ npx esbuild tools/validate.mts   --bundle --platform=node --format=esm --outfile
   EXPRESS and a board with no risk on the sides. Prints the shipped board
   against a variant with the return gates removed, so both numbers sit side by
   side.
+- **`partscheck.mts`** — can every part of the board actually be added and
+  removed? For each kind on the shipped board: delete all of it, build the
+  real world, step it 240 frames. For each palette entry: add one, build,
+  step. Stepping matters as much as building — a stand-in that constructs
+  happily and divides by zero in `tick()` would pass a build-only check.
+
+  It carries a control that must FAIL: a six-target CHICAGO bank, which
+  `ChicagoBank` rejects by name. Every row passing proves nothing if the
+  harness is swallowing exceptions.
+
+  The table also prints what the two rule sets report for each mutilated
+  board, which is the other half of the question. Deleting the drain is
+  allowed and says `sensor-arity`; deleting a flipper says `machine-missing`;
+  deleting the Bean says `feature-unreachable`. A silent cell means the
+  editor would tell you nothing.
+
 - **`captivereach.mts`** — asks whether the captive ball can be HIT, in two
   bands that answer two different questions. The *aperture* band releases
   balls just below the mouth on a board with the mode scoop moved aside, so

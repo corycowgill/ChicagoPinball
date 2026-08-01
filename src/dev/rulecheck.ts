@@ -216,6 +216,26 @@ export const CASES: RuleCase[] = [
     },
   },
   {
+    rule: 'machine-missing',
+    what: 'delete the left flipper — the editor allows it now, so something must say so',
+    mutate: (l) => {
+      const c = clone(l);
+      c.elements = c.elements.filter((e) => !(e.kind === 'flipper' && e.side === 'left'));
+      return c;
+    },
+  },
+  {
+    rule: 'duplicate-part',
+    what: 'a second right-ramp — the loader keeps one slot per label and silently drops the rest',
+    mutate: (l) => {
+      const c = clone(l);
+      const r = c.elements.find((e) => e.kind === 'ramp' && e.label === 'right-ramp');
+      if (!r) throw new Error('rulecheck: no right-ramp — the fixture is stale');
+      c.elements.push({ ...(r as object), id: 'ramp-right-2' } as never);
+      return c;
+    },
+  },
+  {
     rule: 'kicker-placement',
     what: 'the left-outlane kicker pushed off the left edge of the board',
     mutate: mapElement('left-outlane', (e) => {

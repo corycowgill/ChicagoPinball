@@ -25,7 +25,7 @@ import Matter from 'matter-js';
 import { PLAYFIELD_H, PLAYFIELD_W } from '../constants';
 import { DEFAULT_LAYOUT } from '../layout/default';
 import { findDesc, Handle, moveHandle, snap } from '../layout/handles';
-import { PALETTE, requiredReason, uniqueId } from '../layout/palette';
+import { PALETTE, deleteWarning, uniqueId } from '../layout/palette';
 import { duplicate, duplicatedRoleAfter, mirrorCopy } from '../layout/transform';
 import {
   checksumComplaint,
@@ -399,12 +399,15 @@ export class EditorApp {
     if (!this.selected) return this.status('nothing selected');
     const d = findDesc(this.layout, this.selected);
     if (!d) return;
-    const why = requiredReason(this.layout, d);
-    if (why) return this.status(`cannot delete ${d.id}: ${why}`, true);
+    // Deleting is never refused. It used to be, for ten of the nineteen
+    // element kinds, because absence threw rather than removing a feature —
+    // see standIns() in src/layout/build.ts. What is left is a warning, and
+    // the validator panel says the same thing in more detail.
+    const why = deleteWarning(this.layout, d);
     this.checkpoint();
     this.layout.statics = this.layout.statics.filter((s) => s !== (d as never));
     this.layout.elements = this.layout.elements.filter((e) => e !== (d as never));
-    this.status(`deleted ${d.id}`);
+    this.status(why ? `deleted ${d.id} — ${why}` : `deleted ${d.id}`, !!why);
     this.selected = null;
     this.refresh();
   }
@@ -674,11 +677,11 @@ export class EditorApp {
     idRow.textContent = `${String(d.kind)} · ${String(d.id)}`;
     this.inspector.appendChild(idRow);
 
-    const why = requiredReason(this.layout, d as never);
+    const why = deleteWarning(this.layout, d as never);
     if (why) {
       const lock = document.createElement('div');
       lock.className = 'ed-lock';
-      lock.textContent = `Cannot be deleted — ${why}`;
+      lock.textContent = `Delete costs you: ${why}`;
       this.inspector.appendChild(lock);
     }
 
