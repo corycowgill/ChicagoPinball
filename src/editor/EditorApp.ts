@@ -21,10 +21,12 @@
  *     refusals are deletions the LOADER cannot survive — those throw rather
  *     than play badly, and would take the editor down with them.
  */
+import Matter from 'matter-js';
 import { PLAYFIELD_H, PLAYFIELD_W } from '../constants';
 import { DEFAULT_LAYOUT } from '../layout/default';
 import { findDesc, Handle, moveHandle, snap } from '../layout/handles';
 import { PALETTE, requiredReason, uniqueId } from '../layout/palette';
+import { duplicate, duplicatedRoleAfter, mirrorCopy } from '../layout/transform';
 import {
   checksumComplaint,
   cloneLayout,
@@ -59,6 +61,10 @@ export class EditorApp {
   private diagBox!: HTMLDivElement;
   private inspector!: HTMLDivElement;
   private libraryBox!: HTMLDivElement;
+  private eventBox!: HTMLDivElement;
+  private dropBtn!: HTMLButtonElement;
+  /** Set when the next board click drops a test ball instead of selecting. */
+  private pendingDrop = false;
   private statusBar!: HTMLDivElement;
 
   private layout: PlayfieldLayout;
@@ -109,9 +115,14 @@ export class EditorApp {
     window.removeEventListener('keydown', this.onKey);
   }
 
-  /** The host uses this to decide whether Escape means "deselect" or "leave". */
+  /** The host uses this to decide whether Escape means "back out of something"
+   *  or "leave the builder". Every mode the editor can be IN belongs here —
+   *  the host's listener runs first, so anything missing from this list makes
+   *  Escape close the whole editor instead of ending that mode. */
   hasSelection(): boolean {
-    return this.selected !== null || this.pendingAdd !== null;
+    return (
+      this.selected !== null || this.pendingAdd !== null || this.pendingDrop || this.testing
+    );
   }
 
   // ── Model ───────────────────────────────────────────────────────────────
@@ -140,8 +151,14 @@ export class EditorApp {
     this.refresh();
   }
 
-  /** Rebuild the world and the panel from the current draft. */
+  /** Rebuild the world and the panel from the current draft.
+   *
+   *  This is the one funnel every edit passes through, which makes it the
+   *  right place to end a test run: the ball is a body in the world about to
+   *  be thrown away, so letting a run continue would be simulating a board
+   *  that no longer exists. */
   private refresh() {
+    if (this.testBall) this.endTest();
     const built = tryBuildScene(this.layout);
     if ('error' in built) {
       // Keep the last good scene on screen so the board does not vanish, and
@@ -151,8 +168,11 @@ export class EditorApp {
       this.scene = built;
     }
     if (this.selected && !findDesc(this.layout, this.selected)) this.selected = null;
+    this.trail = [];
+    this.eventsShown = 0;
     this.renderDiagnostics();
     this.renderInspector();
+    this.renderEvents();
     this.dirty = true;
   }
 
@@ -165,6 +185,12 @@ export class EditorApp {
       const raw = toBoard(cv, e.clientX, e.clientY);
       const p = this.snapPt(raw);
 
+      if (this.pendingDrop) {
+        this.pendingDrop = false;
+        this.syncModeButtons();
+        this.dropTestBall(raw);
+        return;
+      }
       if (this.pendingAdd) {
         this.addAt(this.pendingAdd, p);
         return;
@@ -253,7 +279,30 @@ export class EditorApp {
       e.shiftKey ? this.redo() : this.undo();
       return;
     }
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyD') {
+      e.preventDefault();
+      this.copySelected('duplicate');
+      return;
+    }
+    if (e.code === 'KeyM') {
+      this.copySelected('mirror');
+      return;
+    }
+    if (e.code === 'KeyT') {
+      this.armDrop();
+      return;
+    }
+    if (e.code === 'KeyR') {
+      this.plungeTestBall();
+      return;
+    }
     if (e.code === 'Escape') {
+      if (this.testing) {
+        this.endTest();
+        this.status('test ball stopped');
+        return;
+      }
+      this.pendingDrop = false;
       this.pendingAdd = null;
       this.selected = null;
       this.dirty = true;
@@ -312,6 +361,38 @@ export class EditorApp {
     this.syncPalette();
     this.refresh();
     this.status(`added ${item.label} as '${id}'`);
+  }
+
+  /** Duplicate or mirror-copy the selection. Both land as a new item at the
+   *  END of the same array, because build order is load-bearing and appending
+   *  is the only insertion point that cannot change how anything already on
+   *  the board behaves. */
+  private copySelected(how: 'duplicate' | 'mirror') {
+    if (!this.selected) return this.status('nothing selected');
+    this.checkpoint();
+    const r = how === 'mirror' ? mirrorCopy(this.layout, this.selected) : duplicate(this.layout, this.selected);
+    if (!r) {
+      this.undoStack.pop();
+      return this.status('could not copy that');
+    }
+    const dupeRole = duplicatedRoleAfter(this.layout, r.id);
+    this.selected = r.id;
+    this.refresh();
+    this.status(
+      dupeRole
+        ? `${how === 'mirror' ? 'mirrored' : 'duplicated'} as '${r.id}' — two '${dupeRole}' sensors now, which the rules will flag`
+        : `${how === 'mirror' ? 'mirrored' : 'duplicated'} as '${r.id}'`,
+      !!dupeRole,
+    );
+  }
+
+  private armDrop() {
+    this.endTest();
+    this.pendingAdd = null;
+    this.pendingDrop = !this.pendingDrop;
+    this.syncPalette();
+    this.syncModeButtons();
+    this.status(this.pendingDrop ? 'click the board to drop a test ball' : 'drop cancelled');
   }
 
   private deleteSelected() {
@@ -429,12 +510,52 @@ export class EditorApp {
     intent.appendChild(document.createTextNode(' corridors + shot lines'));
     tools.appendChild(intent);
 
+    const dup = document.createElement('button');
+    dup.textContent = 'Duplicate';
+    dup.title = 'Copy the selection, nudged clear (Ctrl+D)';
+    dup.onclick = () => this.copySelected('duplicate');
+    tools.appendChild(dup);
+    const mir = document.createElement('button');
+    mir.textContent = 'Mirror';
+    mir.title = 'Copy the selection to the other side of the board (M)';
+    mir.onclick = () => this.copySelected('mirror');
+    tools.appendChild(mir);
+
     const del = document.createElement('button');
     del.textContent = 'Delete';
     del.className = 'ed-danger';
     del.onclick = () => this.deleteSelected();
     tools.appendChild(del);
     this.panel.appendChild(tools);
+
+    // ── Test the board, not just measure it ───────────────────────────────
+    const testHead = document.createElement('div');
+    testHead.className = 'ed-h2';
+    testHead.textContent = 'TEST — the real engine, on this board';
+    this.panel.appendChild(testHead);
+    const testRow = document.createElement('div');
+    testRow.className = 'ed-row';
+    this.dropBtn = document.createElement('button');
+    this.dropBtn.textContent = 'Drop a ball';
+    this.dropBtn.title = 'Then click the board (T)';
+    this.dropBtn.onclick = () => this.armDrop();
+    testRow.appendChild(this.dropBtn);
+    const plunge = document.createElement('button');
+    plunge.textContent = 'Full plunge';
+    plunge.title = 'Serve and launch from the shooter lane (R)';
+    plunge.onclick = () => this.plungeTestBall();
+    testRow.appendChild(plunge);
+    const stop = document.createElement('button');
+    stop.textContent = 'Stop';
+    stop.onclick = () => {
+      this.endTest();
+      this.status('test ball stopped');
+    };
+    testRow.appendChild(stop);
+    this.panel.appendChild(testRow);
+    this.eventBox = document.createElement('div');
+    this.eventBox.className = 'ed-events';
+    this.panel.appendChild(this.eventBox);
 
     // Palette
     const palHead = document.createElement('div');
@@ -484,8 +605,13 @@ export class EditorApp {
     help.className = 'ed-help';
     help.innerHTML =
       'drag to move · handles resize and bend · <b>G</b> grid · <b>Del</b> remove · ' +
-      '<b>arrows</b> nudge (shift ×10) · <b>Ctrl+Z</b> undo · <b>Esc</b> deselect';
+      '<b>arrows</b> nudge (shift ×10) · <b>Ctrl+D</b> duplicate · <b>M</b> mirror · ' +
+      '<b>T</b> drop a ball · <b>R</b> full plunge · <b>Ctrl+Z</b> undo · <b>Esc</b> back out';
     this.panel.appendChild(help);
+  }
+
+  private syncModeButtons() {
+    this.dropBtn?.classList.toggle('on', this.pendingDrop);
   }
 
   private syncPalette() {
@@ -690,9 +816,128 @@ export class EditorApp {
     this.status('exported coordinates');
   }
 
+  // ── The test ball ───────────────────────────────────────────────────────
+  //
+  // The whole premise of the rule set is that geometry can be checked but
+  // BEHAVIOUR cannot: the eject audit exists because no clearance rule can see
+  // that making a shot drains the ball. This is that audit, live and by hand —
+  // drop a ball anywhere and watch the real engine play it out, against the
+  // real bumpers and ramps and scoops, on the board as it is right now.
+  //
+  // It is a mode, not a background process. Editing while a ball is rolling
+  // would mean rebuilding the world under it, so an edit ends the run.
+
+  private testBall: Matter.Body | null = null;
+  private trail: Pt[] = [];
+  private testStepsLeft = 0;
+  private eventsShown = 0;
+
+  /** The board can legitimately eat the ball: the Bean's multiball lock
+   *  removes it, and a scoop holds it. Re-serving before every run means the
+   *  second test works as well as the first, instead of reporting that the
+   *  board has no ball. */
+  private serveTestBall(): Matter.Body | null {
+    const pf = this.scene.playfield;
+    if (pf.balls.length === 0) pf.resetBall();
+    return pf.balls[0]?.body ?? null;
+  }
+
+  private dropTestBall(at: Pt) {
+    this.endTest();
+    const ball = this.serveTestBall();
+    if (!ball) return this.status('this board has no ball to test with', true);
+    Matter.Body.setPosition(ball, at);
+    Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+    Matter.Body.setAngularVelocity(ball, 0);
+    this.testBall = ball;
+    this.trail = [{ ...at }];
+    // 15 seconds. Long enough to see a ball out, short enough that a ball
+    // wedged in a pocket does not hold the editor at 60fps forever.
+    this.testStepsLeft = 900;
+    this.eventsShown = this.scene.events.length;
+    this.status('test ball rolling — any edit stops it');
+  }
+
+  /** Serve and plunge, exactly as the game does, to test the whole flow. */
+  private plungeTestBall() {
+    this.endTest();
+    const pf = this.scene.playfield;
+    const ball = this.serveTestBall();
+    if (!ball) return this.status('this board has no ball to test with', true);
+    Matter.Body.setPosition(ball, {
+      x: this.scene.resolved.frame.launchX,
+      y: this.scene.resolved.frame.launchRestY,
+    });
+    Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+    pf.applyPlungerLaunch(0.95);
+    this.testBall = ball;
+    this.trail = [];
+    this.testStepsLeft = 900;
+    this.eventsShown = this.scene.events.length;
+    this.status('full plunge — any edit stops it');
+  }
+
+  private endTest() {
+    this.testBall = null;
+    this.testStepsLeft = 0;
+    this.dirty = true;
+  }
+
+  get testing(): boolean {
+    return this.testBall !== null && this.testStepsLeft > 0;
+  }
+
+  private stepTest() {
+    const b = this.testBall;
+    if (!b) return;
+    this.scene.playfield.tick(STEP_MS);
+    this.scene.physics.step(STEP_MS);
+    this.testStepsLeft--;
+    const p = { x: b.position.x, y: b.position.y };
+    const last = this.trail[this.trail.length - 1];
+    // Sample by distance, not by frame: a resting ball would otherwise pile
+    // thousands of identical points into the trail.
+    if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 4) this.trail.push(p);
+    if (this.trail.length > 400) this.trail.shift();
+
+    const fresh = this.scene.events.slice(this.eventsShown);
+    if (fresh.length) {
+      this.eventsShown = this.scene.events.length;
+      this.renderEvents();
+      // A drain or an outlane is the end of the story worth watching.
+      if (fresh.some((e) => String(e.kind).endsWith('drain'))) {
+        this.status(`test ball drained after ${(900 - this.testStepsLeft) / 60 | 0}s`);
+        this.endTest();
+        return;
+      }
+    }
+    if (this.testStepsLeft <= 0) this.status('test ball still in play after 15s');
+    this.dirty = true;
+  }
+
+  private renderEvents() {
+    const box = this.eventBox;
+    const recent = this.scene.events.slice(-14).reverse();
+    box.innerHTML = '';
+    if (!recent.length) {
+      const none = document.createElement('div');
+      none.className = 'ed-none';
+      none.textContent = 'Nothing scored yet.';
+      box.appendChild(none);
+      return;
+    }
+    for (const e of recent) {
+      const row = document.createElement('div');
+      row.className = 'ed-event';
+      row.textContent = e.points ? `${e.kind}  ${e.points.toLocaleString()}` : String(e.kind);
+      box.appendChild(row);
+    }
+  }
+
   // ── Frame ───────────────────────────────────────────────────────────────
 
   draw() {
+    if (this.testing) this.stepTest();
     if (!this.dirty) return;
     this.dirty = false;
     drawEditor(this.ctx, this.scene, {
@@ -701,9 +946,13 @@ export class EditorApp {
       activeHandle: this.drag?.handle ?? null,
       grid: GRID_STEPS[this.gridIdx],
       showIntent: this.showIntent,
+      trail: this.trail,
+      ball: this.testBall ? { x: this.testBall.position.x, y: this.testBall.position.y } : null,
     });
   }
 }
+
+const STEP_MS = 1000 / 60;
 
 const round = (n: number) => Math.round(n * 1000) / 1000;
 
@@ -787,6 +1036,10 @@ const CSS = `
 .ed-tools { align-items:center; }
 .ed-check { display:flex; align-items:center; gap:4px; font-size:12px; color:#9fb0c8; }
 .ed-palette { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.ed-events { display:flex; flex-direction:column; gap:2px; max-height:22vh; overflow-y:auto;
+  font-size:11px; color:#9fe0c0; }
+.ed-event { padding:2px 6px; background:rgba(60,200,140,0.07);
+  border-left:2px solid #2f8f63; border-radius:3px; }
 .ed-library { border-top:1px solid #1b2434; padding-top:6px; }
 .ed-boardrow { display:flex; align-items:center; gap:6px; padding:3px 0; }
 .ed-boardrow span { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;

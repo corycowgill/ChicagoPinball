@@ -18,6 +18,10 @@ export interface ViewOptions {
   activeHandle: Handle | null;
   grid: number;
   showIntent: boolean;
+  /** Where the test ball has been, oldest first. */
+  trail: Pt[];
+  /** Where it is now, or null when no run is active. */
+  ball: Pt | null;
 }
 
 const BG = '#0a0e17';
@@ -238,6 +242,51 @@ export function drawEditor(
     }
   }
 
+  // ── The test ball ───────────────────────────────────────────────────────
+  // Drawn last so it is never lost behind a ramp plate. The trail fades from
+  // the tail so the direction of travel reads without an arrow.
+  if (ui.trail.length > 1) {
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    for (let i = 1; i < ui.trail.length; i++) {
+      const t = i / ui.trail.length;
+      ctx.strokeStyle = `rgba(255,240,150,${0.08 + t * 0.6})`;
+      ctx.lineWidth = 1 + t * 2.5;
+      ctx.beginPath();
+      ctx.moveTo(ui.trail[i - 1].x, ui.trail[i - 1].y);
+      ctx.lineTo(ui.trail[i].x, ui.trail[i].y);
+      ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+  }
+  if (ui.ball) {
+    ctx.beginPath();
+    ctx.arc(ui.ball.x, ui.ball.y, 11, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff6c8';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#ffb63c';
+    ctx.stroke();
+  }
+
+  // ── Labels ──────────────────────────────────────────────────────────────
+  // Only for what the pointer is on. Labelling everything turns the board into
+  // a wall of text; labelling nothing means clicking things to find out what
+  // they are.
+  for (const id of [ui.hover, ui.selected]) {
+    if (!id) continue;
+    const d = all.find((x) => x.id === id);
+    if (!d) continue;
+    const b = scene.bodiesById.get(id)?.[0];
+    const at = b
+      ? { x: b.position.x, y: b.position.y }
+      : d.kind === 'deco-post'
+        ? { x: d.x, y: d.y }
+        : null;
+    if (!at) continue;
+    label(ctx, `${d.id}  ·  ${d.kind}`, at.x, at.y - 18, id === ui.selected);
+  }
+
   // ── Handles for the selection ───────────────────────────────────────────
   if (ui.selected) {
     for (const h of scene.handles) {
@@ -301,6 +350,30 @@ function ring(
     ctx.textAlign = 'center';
     ctx.fillText(label, x, y - r - 4);
   }
+  ctx.restore();
+}
+
+/** A small plate behind the text, so an id stays readable over a bright ramp
+ *  or a pale slingshot rather than only over the dark playfield. */
+function label(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  strong: boolean,
+) {
+  ctx.save();
+  ctx.font = `${strong ? 'bold ' : ''}11px Helvetica, Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  const w = ctx.measureText(text).width + 10;
+  const cx = Math.max(w / 2 + 2, Math.min(PLAYFIELD_W - w / 2 - 2, x));
+  ctx.fillStyle = 'rgba(4,8,16,0.85)';
+  ctx.fillRect(cx - w / 2, y - 11, w, 16);
+  ctx.strokeStyle = strong ? 'rgba(255,255,255,0.55)' : 'rgba(150,190,235,0.35)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(cx - w / 2 + 0.5, y - 10.5, w - 1, 15);
+  ctx.fillStyle = strong ? '#ffffff' : '#bcd0ea';
+  ctx.fillText(text, cx, y + 1);
   ctx.restore();
 }
 

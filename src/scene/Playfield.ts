@@ -26,7 +26,7 @@ import { ScoreEvent } from '../types';
 import { PlayfieldLayout } from '../layout/types';
 import { DEFAULT_LAYOUT } from '../layout/default';
 import { ResolvedLayout, resolveLayout } from '../layout/resolve';
-import { buildPlayfield, WallDef } from '../layout/build';
+import { BuildTrace, buildPlayfield, WallDef } from '../layout/build';
 
 export interface PlayfieldEvents {
   onScore: (e: ScoreEvent) => void;
@@ -141,13 +141,19 @@ export class Playfield {
     private physics: Physics,
     private events: PlayfieldEvents,
     layout: PlayfieldLayout = DEFAULT_LAYOUT,
+    /** Optional build observer, forwarded to buildPlayfield. The layout editor
+     *  needs to know which bodies came from which descriptor so a click can
+     *  select the thing under it — and it wants the WIRED playfield, not a
+     *  bare body set, so its test ball meets real bumpers and real ramps.
+     *  Passing nothing keeps the build byte-for-byte what it was. */
+    trace?: BuildTrace,
   ) {
     // The board is DATA now. Everything below this constructor — collision
     // routing, transit, ball management, kickback/express, nudge, lane
     // rotation — is unchanged, because it is entirely label-keyed and
     // position-agnostic. That is what made this refactor safe.
     this.resolved = resolveLayout(layout);
-    const parts = buildPlayfield(physics, this.resolved);
+    const parts = buildPlayfield(physics, this.resolved, trace);
 
     this.balls = parts.balls;
     this.leftFlipper = parts.leftFlipper;

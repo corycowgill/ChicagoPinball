@@ -30,6 +30,16 @@ only way in without abandoning a game in progress, and `?edit` in the URL.
 - **Save as…** names a board so the title screen can offer it; **Boards…**
   lists what you have saved, to load or delete
 - **Export JSON** / **Coordinates** get the board back out
+- **Duplicate** (Ctrl+D) and **Mirror** (M) copy the selection; mirroring
+  reflects it to the other side of the play centre and flips everything
+  directional with it — kick angles, exit velocities, slingshot normals, and
+  sided identity (`left-loop` becomes `right-loop`, a left flipper becomes a
+  right one)
+- **TEST**: **Drop a ball** (T) anywhere, or **Full plunge** (R) from the
+  shooter lane, and watch the real engine play it out — real bumpers, real
+  ramps, real scoops — with a trail and a live list of what it scored. Any
+  edit ends the run, because the world it was rolling in is about to be
+  rebuilt.
 
 Choosing a board other than the one already built reloads onto it
 (`Renderer3D` bakes its table once, so a swap needs a fresh page). The choice
@@ -85,6 +95,13 @@ npx esbuild tools/validate.mts   --bundle --platform=node --format=esm --outfile
 - **`rulecheck.mts`** — mutates the board once per rule and asserts that rule
   fires. A validator that cannot fail reads as coverage while providing none,
   so the rules are held to the same standard as the oracles.
+- **`mirrorcheck.mts`** — proves the editor's mirror is exact, by reflecting
+  the whole shipped board and checking three independent things: every body
+  lands on its twin's reflection, every eject comes out mirrored, and the
+  reflected board passes every rule with the same measured clearances. Note
+  what does *not* work here: mirroring twice and comparing. A field the mirror
+  forgets is unchanged by both flips, so the round trip passes precisely when
+  the bug is present.
 - **`ejectaudit.mts`** — fires every kicker described by the layout (both
   scoops, both ramp exits, the outlane kickback) as a deterministic fan of
   angle × speed variants, steps the **real engine**, and reports the fraction
