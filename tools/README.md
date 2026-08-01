@@ -3,8 +3,18 @@
 ## The layout builder
 
 The board is data (`src/layout/default.ts`), and there is a drag-and-drop
-editor for it in the game itself: the **BUILD LAYOUT** button top-right, or
-`?edit` in the URL.
+editor for it in the game itself. The title screen is a menu — **flippers
+move, start selects**, or tap a row:
+
+```
+  PLAY            start a game
+  BOARD  <name>   start cycles to the next saved board
+  BUILD LAYOUT    open the editor
+```
+
+The `BOARD` row appears once you have saved something to choose between. There
+is also a **BUILD LAYOUT** button in the page's top-right corner, which is the
+only way in without abandoning a game in progress, and `?edit` in the URL.
 
 - drag anything; handles resize circles, bend polylines and aim rails
 - the palette adds posts, rails, bumpers, targets, scoops, spinners, sensors
@@ -21,12 +31,11 @@ editor for it in the game itself: the **BUILD LAYOUT** button top-right, or
   lists what you have saved, to load or delete
 - **Export JSON** / **Coordinates** get the board back out
 
-The title screen picks which board you play: **flippers cycle, start
-launches**, and choosing a different one reloads onto it (`Renderer3D` bakes
-its table once, so a swap needs a fresh page). The choice is explicit and
-stored separately from the boards themselves — saving in the builder does not
-change what the game plays. `?stock` still forces the shipped board without
-touching either.
+Choosing a board other than the one already built reloads onto it
+(`Renderer3D` bakes its table once, so a swap needs a fresh page). The choice
+is explicit and stored separately from the boards themselves — saving in the
+builder does not change what the game plays. `?stock` forces the shipped board
+without touching either.
 
 The editor draws the *real* bodies — it builds the world through
 `buildPlayfield` on every change — so what you see is what the ball collides

@@ -26,14 +26,33 @@ const HUD_TOP = 60;
 const HUD_BOT = 130;
 const APRON_TOP = HUD_BOT;
 
+/** A title-menu row. `Game` owns the list and what START does with it; the
+ *  renderer only draws what it is handed, so the two cannot disagree about
+ *  which row is which. */
+export interface TitleRow {
+  kind: 'play' | 'board' | 'edit';
+  label: string;
+  /** The BOARD row's current board name. */
+  value?: string;
+}
+
+/** Vertical geometry of the title menu, in playfield coordinates.
+ *
+ *  ONE owner: the renderer draws rows here and Game hit-tests taps against the
+ *  same function. Two copies of these numbers is how a tap ends up activating
+ *  the row above the one you touched. */
+export const TITLE_ROW_TOP = 560;
+export const TITLE_ROW_STEP = 42;
+export const TITLE_ROW_H = 38;
+export const titleRowY = (i: number) => TITLE_ROW_TOP + i * TITLE_ROW_STEP;
+
 export interface HudInfo {
   state: GameState;
-  /** Title screen only: the highlighted board, and where it sits in the list.
-   *  `boardIsLoaded` is false when picking it would need a reload, which the
+  /** Title screen only: the menu and the highlighted row. */
+  titleRows: TitleRow[];
+  titleIndex: number;
+  /** False when starting the highlighted board would need a reload, which the
    *  title screen says out loud rather than surprising the player with. */
-  boardName: string;
-  boardIndex: number;
-  boardCount: number;
   boardIsLoaded: boolean;
   score: number;
   ballNumber: number;

@@ -1,7 +1,7 @@
 import Matter from 'matter-js';
 import { Physics } from './Physics';
 import { Playfield } from './scene/Playfield';
-import { HudInfo } from './Renderer';
+import { HudInfo, TITLE_ROW_H, TitleRow, titleRowY } from './Renderer';
 import { InputManager, VirtualKey } from './InputManager';
 import { Sound } from './Sound';
 import { GameState, ScoreEvent, SPORTS, SportId } from './types';
@@ -286,16 +286,23 @@ export class Game {
   private bossHp = BOSS_HP;
   private bossMsLeft = 0;
 
-  // ── Title-screen board select ────────────────────────────────────────────
+  // ── The title menu ───────────────────────────────────────────────────────
   //
-  // The board is data, the builder can make more of them, and until now the
-  // only way to say which one to play was a URL parameter. The title screen is
-  // where a pinball machine tells you what it is, so it is where you choose.
+  // The title screen is where a pinball machine tells you what it is, so it is
+  // where you choose what to do with it: play, pick a board, or go build one.
+  // The builder used to be reachable only from a faded button pinned outside
+  // the machine, which is not where anyone looks.
   //
-  // Flippers cycle, start launches — the same idiom as the initials entry, and
-  // the one a player already has their fingers on.
+  // ONE RULE, and it is printed on screen: flippers move, start selects. The
+  // earlier version had the flippers cycling boards directly, which cannot
+  // survive a second thing to choose — so the BOARD row advances on start
+  // like everything else, and nothing needs a modifier.
   private boards: BoardChoice[] = [];
   private boardIdx = 0;
+  private menuIdx = 0;
+  /** Set by a tap before the synthesised 'enter' arrives, so touching a row
+   *  highlights and activates it in one go. */
+  private pendingTitleRow: number | null = null;
   /** The board actually built into this session. Picking a different one has
    *  to go back through the host, because Renderer3D bakes its table once. */
   private loadedBoardId = STOCK_ID;
@@ -311,6 +318,9 @@ export class Game {
      *  swap needs a fresh Renderer3D, so it is the host's call. Omitted in
      *  headless probes, where the selection is still readable. */
     private onBoardSelected?: (id: string) => void,
+    /** How the host opens the layout builder. Same division of labour: the
+     *  title menu decides you asked for it, the host owns the DOM. */
+    private onOpenEditor?: () => void,
   ) {
     this.rebuildWorld();
     this.refreshBoards();
@@ -324,15 +334,15 @@ export class Game {
     window.addEventListener('keydown', () => this.sound.unlock());
   }
 
-  /** Re-read the library. The builder can add or delete boards while the game
-   *  sits on the title screen, so this runs on every return to TITLE and
-   *  whenever the host closes the editor — not once at construction. */
   /** Hand the keyboard to something else (the layout builder) and take it
    *  back. See InputManager.setEnabled for why dropping beats buffering. */
   setInputEnabled(on: boolean) {
     this.input.setEnabled(on);
   }
 
+  /** Re-read the library. The builder can add or delete boards while the game
+   *  sits on the title screen, so this runs on every return to TITLE and
+   *  whenever the host closes the editor — not once at construction. */
   refreshBoards() {
     this.loadedBoardId = selectedBoardId();
     this.boards = [
@@ -343,12 +353,52 @@ export class Game {
     // pointing at nothing.
     const at = this.boards.findIndex((b) => b.id === this.loadedBoardId);
     this.boardIdx = at >= 0 ? at : 0;
+    this.menuIdx = Math.min(this.menuIdx, this.titleRows().length - 1);
   }
 
-  private cycleBoard(step: number) {
-    if (this.boards.length < 2) return;
-    this.boardIdx = (this.boardIdx + step + this.boards.length) % this.boards.length;
+  /** The menu, rebuilt from current state rather than stored.
+   *
+   *  It is handed to the renderer through HudInfo so the list you see and the
+   *  list START acts on are the same array — a second copy in the renderer
+   *  would eventually disagree about which row is which. */
+  titleRows(): TitleRow[] {
+    const rows: TitleRow[] = [{ kind: 'play', label: 'PLAY' }];
+    // A chooser with one choice is clutter; the row appears once you have
+    // built something to choose.
+    if (this.boards.length > 1) {
+      rows.push({
+        kind: 'board',
+        label: 'BOARD',
+        value: this.boards[this.boardIdx]?.name ?? '',
+      });
+    }
+    rows.push({ kind: 'edit', label: 'BUILD LAYOUT' });
+    return rows;
+  }
+
+  private moveTitleMenu(step: number) {
+    const n = this.titleRows().length;
+    this.menuIdx = (this.menuIdx + step + n) % n;
     this.sound.rollover();
+  }
+
+  private activateTitleRow() {
+    const rows = this.titleRows();
+    const row = rows[this.menuIdx] ?? rows[0];
+    switch (row.kind) {
+      case 'play':
+        this.launchSelectedBoard();
+        return;
+      case 'board':
+        // Advance in place: you stay on the row, so a second press keeps
+        // going and the highlight never moves under you.
+        this.boardIdx = (this.boardIdx + 1) % this.boards.length;
+        this.sound.rollover();
+        return;
+      case 'edit':
+        this.onOpenEditor?.();
+        return;
+    }
   }
 
   private resolveTouchKey(x: number, y: number): VirtualKey | null {
@@ -376,13 +426,20 @@ export class Game {
       return 'enter';
     }
     if (this.state === GameState.TITLE) {
-      // Same shape as the initials entry: side thirds cycle, middle commits.
-      // Only worth splitting the screen up when there is something to cycle
-      // through — with one board, every tap should just start the game.
-      if (this.boards.length > 1) {
-        if (x < PLAYFIELD_W / 3) return 'leftFlipper';
-        if (x > (2 * PLAYFIELD_W) / 3) return 'rightFlipper';
+      // Tap a row to highlight AND activate it. The row geometry comes from
+      // the renderer so the thing you hit is the thing you saw; the tap is
+      // recorded and the press routed through the normal activation path.
+      const rows = this.titleRows();
+      for (let i = 0; i < rows.length; i++) {
+        const cy = titleRowY(i);
+        if (y >= cy - TITLE_ROW_H / 2 && y <= cy + TITLE_ROW_H / 2) {
+          this.pendingTitleRow = i;
+          return 'enter';
+        }
       }
+      // Anywhere else on the screen means "get on with it" — the marquee is
+      // not a dead zone.
+      this.pendingTitleRow = rows.findIndex((r) => r.kind === 'play');
       return 'enter';
     }
     if (this.state === GameState.GAME_OVER) return 'enter';
@@ -1268,9 +1325,16 @@ export class Game {
     }
 
     if (this.state === GameState.TITLE) {
-      if (this.input.wasPressed('leftFlipper')) this.cycleBoard(-1);
-      if (this.input.wasPressed('rightFlipper')) this.cycleBoard(1);
-      if (this.input.wasPressed('enter')) this.launchSelectedBoard();
+      if (this.input.wasPressed('leftFlipper')) this.moveTitleMenu(-1);
+      if (this.input.wasPressed('rightFlipper')) this.moveTitleMenu(1);
+      if (this.input.wasPressed('enter')) {
+        // A tap names its own row; the keyboard uses wherever the caret is.
+        if (this.pendingTitleRow !== null) {
+          this.menuIdx = this.pendingTitleRow;
+          this.pendingTitleRow = null;
+        }
+        this.activateTitleRow();
+      }
       this.renderer.tick(dtMs);
       this.input.endFrame();
       return;
@@ -1654,9 +1718,8 @@ export class Game {
         this.state === GameState.BALL_DRAINED && this.ceremonyTotal > 0
           ? Math.min(1, 1 - Math.max(0, this.respawnTimer - 400) / this.ceremonyDuration)
           : 0,
-      boardName: this.boards[this.boardIdx]?.name ?? 'ORIGINAL BOARD',
-      boardIndex: this.boardIdx,
-      boardCount: this.boards.length,
+      titleRows: this.titleRows(),
+      titleIndex: this.menuIdx,
       boardIsLoaded: this.boards[this.boardIdx]?.id === this.loadedBoardId,
       highScore: this.highScore,
       highScoreInitials: this.highScoreInitials,

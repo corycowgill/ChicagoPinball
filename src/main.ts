@@ -52,7 +52,7 @@ function swapBoard() {
 
 const renderer = new Renderer3D(glCanvas, uiCanvas);
 // Input lands on the top (overlay) canvas.
-const game = new Game(renderer, uiCanvas, bootLayout(), swapBoard);
+const game = new Game(renderer, uiCanvas, bootLayout(), swapBoard, () => openEditor());
 // Test hook: expose the game for headless probes.
 (window as unknown as { __pinball?: unknown }).__pinball = game;
 
