@@ -6,6 +6,14 @@ import { InputManager, VirtualKey } from './InputManager';
 import { Sound } from './Sound';
 import { GameState, ScoreEvent, SPORTS, SportId } from './types';
 import { DEFAULT_LAYOUT } from './layout/default';
+import {
+  armAutostart,
+  listBoards,
+  selectedBoardId,
+  setSelectedBoardId,
+  STOCK_ID,
+  takeAutostart,
+} from './layout/storage';
 import { PlayfieldLayout } from './layout/types';
 import {
   STARTING_BALLS,
@@ -131,6 +139,11 @@ const BOSS_DAMAGE: Partial<Record<ScoreEvent['kind'], number>> = {
   standup: 2,
   'pop-bumper': 1,
 };
+
+interface BoardChoice {
+  id: string;
+  name: string;
+}
 
 export class Game {
   private physics!: Physics;
@@ -273,6 +286,20 @@ export class Game {
   private bossHp = BOSS_HP;
   private bossMsLeft = 0;
 
+  // ── Title-screen board select ────────────────────────────────────────────
+  //
+  // The board is data, the builder can make more of them, and until now the
+  // only way to say which one to play was a URL parameter. The title screen is
+  // where a pinball machine tells you what it is, so it is where you choose.
+  //
+  // Flippers cycle, start launches — the same idiom as the initials entry, and
+  // the one a player already has their fingers on.
+  private boards: BoardChoice[] = [];
+  private boardIdx = 0;
+  /** The board actually built into this session. Picking a different one has
+   *  to go back through the host, because Renderer3D bakes its table once. */
+  private loadedBoardId = STOCK_ID;
+
   constructor(
     private renderer: GameRenderer,
     canvas?: HTMLElement,
@@ -280,14 +307,48 @@ export class Game {
      *  passes an edited board here, which is the whole point of the board
      *  being data. */
     private layout: PlayfieldLayout = DEFAULT_LAYOUT,
+    /** How the host swaps to a different board. Game only decides WHICH; the
+     *  swap needs a fresh Renderer3D, so it is the host's call. Omitted in
+     *  headless probes, where the selection is still readable. */
+    private onBoardSelected?: (id: string) => void,
   ) {
     this.rebuildWorld();
+    this.refreshBoards();
+    // Came back from a board swap that the player triggered with START.
+    if (takeAutostart()) this.startGame();
     if (canvas) {
       this.input.attachPointer(canvas, (x, y) => this.resolveTouchKey(x, y));
     }
     // Browsers gate audio behind a user gesture; resume on any interaction.
     window.addEventListener('pointerdown', () => this.sound.unlock());
     window.addEventListener('keydown', () => this.sound.unlock());
+  }
+
+  /** Re-read the library. The builder can add or delete boards while the game
+   *  sits on the title screen, so this runs on every return to TITLE and
+   *  whenever the host closes the editor — not once at construction. */
+  /** Hand the keyboard to something else (the layout builder) and take it
+   *  back. See InputManager.setEnabled for why dropping beats buffering. */
+  setInputEnabled(on: boolean) {
+    this.input.setEnabled(on);
+  }
+
+  refreshBoards() {
+    this.loadedBoardId = selectedBoardId();
+    this.boards = [
+      { id: STOCK_ID, name: 'ORIGINAL BOARD' },
+      ...listBoards().map((b) => ({ id: b.id, name: b.name.toUpperCase() })),
+    ];
+    // A board deleted while the title was up must not leave the cursor
+    // pointing at nothing.
+    const at = this.boards.findIndex((b) => b.id === this.loadedBoardId);
+    this.boardIdx = at >= 0 ? at : 0;
+  }
+
+  private cycleBoard(step: number) {
+    if (this.boards.length < 2) return;
+    this.boardIdx = (this.boardIdx + step + this.boards.length) % this.boards.length;
+    this.sound.rollover();
   }
 
   private resolveTouchKey(x: number, y: number): VirtualKey | null {
@@ -314,7 +375,17 @@ export class Game {
       if (x > (2 * PLAYFIELD_W) / 3) return 'rightFlipper';
       return 'enter';
     }
-    if (this.state === GameState.TITLE || this.state === GameState.GAME_OVER) return 'enter';
+    if (this.state === GameState.TITLE) {
+      // Same shape as the initials entry: side thirds cycle, middle commits.
+      // Only worth splitting the screen up when there is something to cycle
+      // through — with one board, every tap should just start the game.
+      if (this.boards.length > 1) {
+        if (x < PLAYFIELD_W / 3) return 'leftFlipper';
+        if (x > (2 * PLAYFIELD_W) / 3) return 'rightFlipper';
+      }
+      return 'enter';
+    }
+    if (this.state === GameState.GAME_OVER) return 'enter';
     if (this.state === GameState.READY) return 'plunger';
     if (this.state === GameState.BALL_DRAINED) return null;
     // PLAYING — touch in the lower-RIGHT corner (over the shooter lane)
@@ -1197,7 +1268,9 @@ export class Game {
     }
 
     if (this.state === GameState.TITLE) {
-      if (this.input.wasPressed('enter')) this.startGame();
+      if (this.input.wasPressed('leftFlipper')) this.cycleBoard(-1);
+      if (this.input.wasPressed('rightFlipper')) this.cycleBoard(1);
+      if (this.input.wasPressed('enter')) this.launchSelectedBoard();
       this.renderer.tick(dtMs);
       this.input.endFrame();
       return;
@@ -1207,6 +1280,8 @@ export class Game {
         this.tickInitialsEntry();
       } else if (this.input.wasPressed('enter')) {
         this.state = GameState.TITLE;
+        // The builder may have added or removed boards during the game.
+        this.refreshBoards();
       }
       this.renderer.tick(dtMs);
       this.input.endFrame();
@@ -1579,6 +1654,10 @@ export class Game {
         this.state === GameState.BALL_DRAINED && this.ceremonyTotal > 0
           ? Math.min(1, 1 - Math.max(0, this.respawnTimer - 400) / this.ceremonyDuration)
           : 0,
+      boardName: this.boards[this.boardIdx]?.name ?? 'ORIGINAL BOARD',
+      boardIndex: this.boardIdx,
+      boardCount: this.boards.length,
+      boardIsLoaded: this.boards[this.boardIdx]?.id === this.loadedBoardId,
       highScore: this.highScore,
       highScoreInitials: this.highScoreInitials,
       enteringInitials: this.enteringInitials,
@@ -1590,6 +1669,25 @@ export class Game {
       bossMsLeft: this.bossMsLeft,
     };
     this.renderer.draw(this.playfield, hud);
+  }
+
+  /** Start on the highlighted board. If it is the one already built, that is
+   *  just a normal start; otherwise the host has to rebuild the world and its
+   *  3D table from new data, which today means a page load. Recording the
+   *  choice first is what makes that reload land on the right board. */
+  private launchSelectedBoard() {
+    const pick = this.boards[this.boardIdx];
+    if (pick && pick.id !== this.loadedBoardId) {
+      setSelectedBoardId(pick.id);
+      if (this.onBoardSelected) {
+        armAutostart();
+        this.onBoardSelected(pick.id);
+        return;
+      }
+      // No host to swap for us (headless): the choice is recorded, and the
+      // game starts on the board it already has rather than pretending.
+    }
+    this.startGame();
   }
 
   private startGame() {

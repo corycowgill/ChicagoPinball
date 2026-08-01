@@ -28,10 +28,15 @@ import { PALETTE, requiredReason, uniqueId } from '../layout/palette';
 import {
   checksumComplaint,
   cloneLayout,
-  loadFromStorage,
+  deleteBoard,
+  DRAFT_ID,
+  listBoards,
+  loadBoard,
   parseLayoutFile,
-  saveToStorage,
+  saveBoard,
   serialize,
+  setSelectedBoardId,
+  uniqueBoardId,
 } from '../layout/storage';
 import { PlayfieldLayout, Pt } from '../layout/types';
 import { EditorScene, pickHandle, pickItem, tryBuildScene } from './scene';
@@ -53,6 +58,7 @@ export class EditorApp {
   private panel!: HTMLDivElement;
   private diagBox!: HTMLDivElement;
   private inspector!: HTMLDivElement;
+  private libraryBox!: HTMLDivElement;
   private statusBar!: HTMLDivElement;
 
   private layout: PlayfieldLayout;
@@ -69,7 +75,9 @@ export class EditorApp {
   private dirty = true;
 
   constructor(private host: EditorHost, initial?: PlayfieldLayout) {
-    this.layout = cloneLayout(initial ?? loadFromStorage()?.layout ?? DEFAULT_LAYOUT);
+    // The draft slot, which "Play this board" writes and the library migrates
+    // the pre-library single slot into.
+    this.layout = cloneLayout(initial ?? loadBoard(DRAFT_ID)?.layout ?? DEFAULT_LAYOUT);
     const built = tryBuildScene(this.layout);
     if ('error' in built) {
       // A stored layout can be unbuildable if it was saved by a newer editor
@@ -360,13 +368,25 @@ export class EditorApp {
       return b;
     };
     mk('▶ Play this board', 'ed-primary', () => {
-      saveToStorage(this.layout, 'working');
+      // Straight into the game on the draft, without needing a name first.
+      saveBoard(DRAFT_ID, this.layout, 'Working draft');
+      setSelectedBoardId(DRAFT_ID);
       this.host.play(cloneLayout(this.layout));
     });
-    mk('Save', '', () => {
-      const ok = saveToStorage(this.layout, 'working');
-      this.status(ok ? 'saved to this browser' : 'could not save — storage is unavailable', !ok);
+    mk('Save as…', '', () => {
+      // Named saves are what make the title screen's picker worth having: a
+      // board you cannot tell apart from the others is a board you will not
+      // choose. The draft slot stays separate so "Play this board" never
+      // overwrites something you deliberately named.
+      const name = window.prompt('Name this board', suggestName(this.layout))?.trim();
+      if (!name) return;
+      const ok = saveBoard(uniqueBoardId(name), this.layout, name);
+      this.status(
+        ok ? `saved as '${name}' — pick it on the title screen` : 'could not save — storage is unavailable',
+        !ok,
+      );
     });
+    mk('Boards…', '', () => this.showLibrary());
     mk('Export JSON', '', () => this.exportJson());
     mk('Import', '', () => this.importJson());
     mk('Coordinates', '', () => this.exportCoords());
@@ -436,6 +456,12 @@ export class EditorApp {
       pal.appendChild(b);
     }
     this.panel.appendChild(pal);
+
+    // Saved boards, shown on demand
+    this.libraryBox = document.createElement('div');
+    this.libraryBox.className = 'ed-library';
+    this.libraryBox.style.display = 'none';
+    this.panel.appendChild(this.libraryBox);
 
     // Inspector + diagnostics
     this.inspector = document.createElement('div');
@@ -561,6 +587,70 @@ export class EditorApp {
     this.inspector.appendChild(grid);
   }
 
+  /** The saved-board library: load one back in, or throw one away. Kept in the
+   *  editor rather than the title screen because deleting is an editing act,
+   *  and the title screen should not be a place where you can lose work. */
+  private showLibrary() {
+    const box = this.libraryBox;
+    if (box.style.display !== 'none') {
+      box.style.display = 'none';
+      return;
+    }
+    box.style.display = '';
+    this.renderLibrary();
+  }
+
+  private renderLibrary() {
+    const box = this.libraryBox;
+    box.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'ed-h2';
+    head.textContent = 'SAVED BOARDS';
+    box.appendChild(head);
+
+    const boards = listBoards();
+    if (!boards.length) {
+      const none = document.createElement('div');
+      none.className = 'ed-none';
+      none.textContent = 'Nothing saved yet. Use “Save as…”.';
+      box.appendChild(none);
+      return;
+    }
+    for (const b of boards) {
+      const row = document.createElement('div');
+      row.className = 'ed-boardrow';
+      const label = document.createElement('span');
+      label.textContent = b.name;
+      label.title = `${b.id} · saved ${b.savedAt.slice(0, 16).replace('T', ' ')}`;
+      const load = document.createElement('button');
+      load.textContent = 'Load';
+      load.onclick = () => {
+        const f = loadBoard(b.id);
+        if (!f) return this.status(`'${b.name}' is no longer in storage`, true);
+        const built = tryBuildScene(f.layout);
+        if ('error' in built) return this.status(`'${b.name}' will not build: ${built.error}`, true);
+        this.checkpoint();
+        this.layout = f.layout;
+        this.selected = null;
+        this.refresh();
+        this.status(`loaded '${b.name}'`);
+      };
+      const del = document.createElement('button');
+      del.textContent = 'Delete';
+      del.className = 'ed-danger';
+      del.onclick = () => {
+        if (!window.confirm(`Delete '${b.name}'? This cannot be undone.`)) return;
+        deleteBoard(b.id);
+        // The title screen falls back to stock on its own if the deleted board
+        // was the selected one, so there is nothing to repair here.
+        this.renderLibrary();
+        this.status(`deleted '${b.name}'`);
+      };
+      row.append(label, load, del);
+      box.appendChild(row);
+    }
+  }
+
   // ── Import / export ─────────────────────────────────────────────────────
 
   private exportJson() {
@@ -616,6 +706,12 @@ export class EditorApp {
 }
 
 const round = (n: number) => Math.round(n * 1000) / 1000;
+
+/** A starting point for the name prompt: the layout's own name, which the
+ *  stock board carries and an imported file keeps. */
+function suggestName(l: PlayfieldLayout): string {
+  return l.name ? `${l.name} (edited)` : 'My board';
+}
 
 function describe(d: Record<string, unknown> | object): string {
   const o = d as Record<string, unknown>;
@@ -691,6 +787,11 @@ const CSS = `
 .ed-tools { align-items:center; }
 .ed-check { display:flex; align-items:center; gap:4px; font-size:12px; color:#9fb0c8; }
 .ed-palette { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.ed-library { border-top:1px solid #1b2434; padding-top:6px; }
+.ed-boardrow { display:flex; align-items:center; gap:6px; padding:3px 0; }
+.ed-boardrow span { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; color:#ffd98a; }
+.ed-boardrow button { padding:3px 8px; font-size:11px; }
 .ed-inspector { border-top:1px solid #1b2434; padding-top:6px; }
 .ed-idrow { font-weight:600; color:#ffd98a; margin:2px 0 6px; word-break:break-all; }
 .ed-lock { font-size:11px; color:#ffae7a; background:rgba(255,140,60,0.08);

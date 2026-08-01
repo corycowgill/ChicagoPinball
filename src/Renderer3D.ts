@@ -2228,17 +2228,62 @@ export class Renderer3D {
         const tag = hud.highScoreInitials ? `${hud.highScoreInitials}  ` : '';
         ctx.fillText(`HIGH SCORE  ${tag}${hud.highScore.toLocaleString()}`, PLAYFIELD_W / 2, 540);
       }
+      // ── Board select ────────────────────────────────────────────────────
+      // Drawn as a machine's own card would be: a framed plate naming the
+      // board, with the flipper arrows that change it. Hidden entirely when
+      // there is only the stock board, because a chooser with one choice is
+      // just clutter.
+      if (hud.boardCount > 1) {
+        const cy = 566;
+        ctx.strokeStyle = 'rgba(150,190,235,0.35)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(70.5, cy - 26.5, PLAYFIELD_W - 141, 44);
+        ctx.fillStyle = 'rgba(6,12,22,0.55)';
+        ctx.fillRect(71, cy - 26, PLAYFIELD_W - 142, 43);
+
+        ctx.fillStyle = COLOR.TEXT_DIM;
+        ctx.font = '10px "Helvetica Neue", Arial, sans-serif';
+        (ctx as unknown as { letterSpacing?: string }).letterSpacing = '3px';
+        ctx.fillText('BOARD', PLAYFIELD_W / 2, cy - 12);
+        (ctx as unknown as { letterSpacing?: string }).letterSpacing = '0px';
+
+        ctx.fillStyle = hud.boardIsLoaded ? COLOR.NEON_CYAN : COLOR.TEXT;
+        ctx.font = 'bold 17px "Helvetica Neue", Arial, sans-serif';
+        ctx.fillText(fitText(ctx, hud.boardName, PLAYFIELD_W - 220), PLAYFIELD_W / 2, cy + 10);
+
+        // Arrows pulse toward whichever flipper moves the list.
+        const beat = Math.sin(performance.now() / 260) * 2;
+        ctx.fillStyle = 'rgba(190,215,245,0.85)';
+        ctx.font = 'bold 16px "Helvetica Neue", Arial, sans-serif';
+        ctx.fillText('◀', 92 - beat, cy + 6);
+        ctx.fillText('▶', PLAYFIELD_W - 92 + beat, cy + 6);
+
+        ctx.fillStyle = COLOR.TEXT_DIM;
+        ctx.font = '10px "Helvetica Neue", Arial, sans-serif';
+        ctx.fillText(
+          hud.boardIsLoaded
+            ? `${hud.boardIndex + 1} of ${hud.boardCount} · flippers to change`
+            : `${hud.boardIndex + 1} of ${hud.boardCount} · start reloads onto this board`,
+          PLAYFIELD_W / 2,
+          cy + 30,
+        );
+      }
+
       if (Math.sin(performance.now() / 300) > 0) {
         ctx.shadowColor = COLOR.NEON_AMBER;
         ctx.shadowBlur = 14;
         ctx.fillStyle = COLOR.NEON_AMBER;
         ctx.font = 'bold 18px "Helvetica Neue", Arial, sans-serif';
-        ctx.fillText('PRESS ENTER TO START', PLAYFIELD_W / 2, 596);
+        ctx.fillText('PRESS ENTER TO START', PLAYFIELD_W / 2, hud.boardCount > 1 ? 632 : 596);
         ctx.shadowBlur = 0;
       }
       ctx.fillStyle = COLOR.TEXT_DIM;
       ctx.font = '11px "Helvetica Neue", Arial, sans-serif';
-      ctx.fillText('Z / ⁄ flippers · SPACE plunger · C/N nudge · M mute', PLAYFIELD_W / 2, 634);
+      ctx.fillText(
+        'Z / ⁄ flippers · SPACE plunger · C/N nudge · M mute',
+        PLAYFIELD_W / 2,
+        hud.boardCount > 1 ? 664 : 634,
+      );
       return;
     }
 
@@ -2560,4 +2605,14 @@ function sportColor(id: string): string {
     default:
       return '#ffffff';
   }
+}
+
+/** Ellipsise to fit. A board name is whatever the player typed, so it can be
+ *  any length, and text that runs off the plate reads as a bug rather than as
+ *  a long name. Measured in the caller's current font. */
+function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let s = text;
+  while (s.length > 1 && ctx.measureText(`${s}…`).width > maxWidth) s = s.slice(0, -1);
+  return `${s}…`;
 }

@@ -28,6 +28,13 @@ const APRON_TOP = HUD_BOT;
 
 export interface HudInfo {
   state: GameState;
+  /** Title screen only: the highlighted board, and where it sits in the list.
+   *  `boardIsLoaded` is false when picking it would need a reload, which the
+   *  title screen says out loud rather than surprising the player with. */
+  boardName: string;
+  boardIndex: number;
+  boardCount: number;
+  boardIsLoaded: boolean;
   score: number;
   ballNumber: number;
   playerScores: number[];

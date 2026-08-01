@@ -16,9 +16,17 @@ editor for it in the game itself: the **BUILD LAYOUT** button top-right, or
     the rules the game ships. The rules engine is keyed by collision label, so
     deleting the left ramp throws nothing and looks like nothing — BASEBALL
     simply never starts.
-- **Play this board** saves to `localStorage` and reloads into the game
+- **Play this board** saves to the draft slot and reloads into the game
+- **Save as…** names a board so the title screen can offer it; **Boards…**
+  lists what you have saved, to load or delete
 - **Export JSON** / **Coordinates** get the board back out
-- `?stock` plays the shipped board without clearing what you saved
+
+The title screen picks which board you play: **flippers cycle, start
+launches**, and choosing a different one reloads onto it (`Renderer3D` bakes
+its table once, so a swap needs a fresh page). The choice is explicit and
+stored separately from the boards themselves — saving in the builder does not
+change what the game plays. `?stock` still forces the shipped board without
+touching either.
 
 The editor draws the *real* bodies — it builds the world through
 `buildPlayfield` on every change — so what you see is what the ball collides

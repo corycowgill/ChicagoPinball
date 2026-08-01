@@ -40,6 +40,26 @@ export class InputManager {
 
   private canvas: HTMLElement | null = null;
   private resolveTouchKey: TouchKeyResolver | null = null;
+  private enabled = true;
+
+  /** Suspend input entirely while something else owns the keyboard.
+   *
+   *  The layout builder does, and the two share bindings: its arrow-key nudge
+   *  is the game's ArrowLeft/ArrowRight flipper mapping. Worse, the game is
+   *  not updating while the builder is open, so `endFrame()` never runs and
+   *  every mapped key pressed in the builder piles up in `pressedThisFrame` —
+   *  then fires at once on the first frame after it closes. Forty nudges
+   *  became forty flips. Dropping the events rather than buffering them is the
+   *  fix, and it closes the whole class rather than this one binding. */
+  setEnabled(on: boolean) {
+    this.enabled = on;
+    if (!on) {
+      this.held.clear();
+      this.pointerKeys.clear();
+      this.pressedThisFrame.clear();
+      this.releasedThisFrame.clear();
+    }
+  }
 
   constructor(target: EventTarget = window) {
     target.addEventListener('keydown', (e) => this.onKeyDown(e as KeyboardEvent));
@@ -67,6 +87,7 @@ export class InputManager {
   }
 
   private onKeyDown(e: KeyboardEvent) {
+    if (!this.enabled) return;
     const k = KEY_MAP[e.code];
     if (!k) return;
     e.preventDefault();
@@ -75,6 +96,7 @@ export class InputManager {
   }
 
   private onKeyUp(e: KeyboardEvent) {
+    if (!this.enabled) return;
     const k = KEY_MAP[e.code];
     if (!k) return;
     e.preventDefault();
@@ -83,7 +105,7 @@ export class InputManager {
   }
 
   private onPointerDown = (e: PointerEvent) => {
-    if (!this.canvas || !this.resolveTouchKey) return;
+    if (!this.enabled || !this.canvas || !this.resolveTouchKey) return;
     e.preventDefault();
     const rect = this.canvas.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * PLAYFIELD_W;
