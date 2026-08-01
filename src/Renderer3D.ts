@@ -3,7 +3,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import Matter from 'matter-js';
 import { Playfield } from './scene/Playfield';
-import { Renderer, HudInfo } from './Renderer';
+import { HudInfo, Renderer, TITLE_ROW_H, TitleRow, titleRowY } from './Renderer';
 import { Dmd } from './Dmd';
 import { decoStar } from './Graphics';
 import { GameState, SPORTS } from './types';
@@ -2228,61 +2228,53 @@ export class Renderer3D {
         const tag = hud.highScoreInitials ? `${hud.highScoreInitials}  ` : '';
         ctx.fillText(`HIGH SCORE  ${tag}${hud.highScore.toLocaleString()}`, PLAYFIELD_W / 2, 540);
       }
-      // ── Board select ────────────────────────────────────────────────────
-      // Drawn as a machine's own card would be: a framed plate naming the
-      // board, with the flipper arrows that change it. Hidden entirely when
-      // there is only the stock board, because a chooser with one choice is
-      // just clutter.
-      if (hud.boardCount > 1) {
-        const cy = 566;
-        ctx.strokeStyle = 'rgba(150,190,235,0.35)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(70.5, cy - 26.5, PLAYFIELD_W - 141, 44);
-        ctx.fillStyle = 'rgba(6,12,22,0.55)';
-        ctx.fillRect(71, cy - 26, PLAYFIELD_W - 142, 43);
+      // ── The menu ────────────────────────────────────────────────────────
+      // Rows come from the Game, so what is drawn and what START acts on are
+      // the same list. Geometry comes from titleRowY, which Game also uses to
+      // hit-test taps — the row you touch is the row you saw.
+      const rows = hud.titleRows;
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const cy = titleRowY(i);
+        const on = i === hud.titleIndex;
+        const top = cy - TITLE_ROW_H / 2;
 
-        ctx.fillStyle = COLOR.TEXT_DIM;
-        ctx.font = '10px "Helvetica Neue", Arial, sans-serif';
-        (ctx as unknown as { letterSpacing?: string }).letterSpacing = '3px';
-        ctx.fillText('BOARD', PLAYFIELD_W / 2, cy - 12);
+        ctx.fillStyle = on ? 'rgba(20,52,74,0.85)' : 'rgba(6,12,22,0.5)';
+        ctx.fillRect(70, top, PLAYFIELD_W - 140, TITLE_ROW_H);
+        ctx.strokeStyle = on ? COLOR.NEON_CYAN : 'rgba(150,190,235,0.28)';
+        ctx.lineWidth = on ? 2 : 1;
+        ctx.strokeRect(70.5, top + 0.5, PLAYFIELD_W - 141, TITLE_ROW_H - 1);
+
+        // Caret on the highlighted row, breathing so the screen reads as live.
+        if (on) {
+          ctx.fillStyle = COLOR.NEON_AMBER;
+          ctx.font = 'bold 15px "Helvetica Neue", Arial, sans-serif';
+          ctx.fillText('▸', 86 + Math.sin(performance.now() / 260) * 2, cy + 6);
+        }
+
+        ctx.fillStyle = on ? COLOR.TEXT : COLOR.TEXT_DIM;
+        ctx.font = `bold ${row.value ? 12 : 16}px "Helvetica Neue", Arial, sans-serif`;
+        (ctx as unknown as { letterSpacing?: string }).letterSpacing = row.value ? '3px' : '2px';
+        ctx.fillText(row.label, PLAYFIELD_W / 2, row.value ? cy - 4 : cy + 6);
         (ctx as unknown as { letterSpacing?: string }).letterSpacing = '0px';
 
-        ctx.fillStyle = hud.boardIsLoaded ? COLOR.NEON_CYAN : COLOR.TEXT;
-        ctx.font = 'bold 17px "Helvetica Neue", Arial, sans-serif';
-        ctx.fillText(fitText(ctx, hud.boardName, PLAYFIELD_W - 220), PLAYFIELD_W / 2, cy + 10);
-
-        // Arrows pulse toward whichever flipper moves the list.
-        const beat = Math.sin(performance.now() / 260) * 2;
-        ctx.fillStyle = 'rgba(190,215,245,0.85)';
-        ctx.font = 'bold 16px "Helvetica Neue", Arial, sans-serif';
-        ctx.fillText('◀', 92 - beat, cy + 6);
-        ctx.fillText('▶', PLAYFIELD_W - 92 + beat, cy + 6);
-
-        ctx.fillStyle = COLOR.TEXT_DIM;
-        ctx.font = '10px "Helvetica Neue", Arial, sans-serif';
-        ctx.fillText(
-          hud.boardIsLoaded
-            ? `${hud.boardIndex + 1} of ${hud.boardCount} · flippers to change`
-            : `${hud.boardIndex + 1} of ${hud.boardCount} · start reloads onto this board`,
-          PLAYFIELD_W / 2,
-          cy + 30,
-        );
+        if (row.value) {
+          // A board that is already built starts instantly; any other needs a
+          // reload, and the hint under the menu says so.
+          ctx.fillStyle = hud.boardIsLoaded ? COLOR.NEON_CYAN : COLOR.TEXT_GOLD;
+          ctx.font = 'bold 15px "Helvetica Neue", Arial, sans-serif';
+          ctx.fillText(fitText(ctx, row.value, PLAYFIELD_W - 180), PLAYFIELD_W / 2, cy + 13);
+        }
       }
 
-      if (Math.sin(performance.now() / 300) > 0) {
-        ctx.shadowColor = COLOR.NEON_AMBER;
-        ctx.shadowBlur = 14;
-        ctx.fillStyle = COLOR.NEON_AMBER;
-        ctx.font = 'bold 18px "Helvetica Neue", Arial, sans-serif';
-        ctx.fillText('PRESS ENTER TO START', PLAYFIELD_W / 2, hud.boardCount > 1 ? 632 : 596);
-        ctx.shadowBlur = 0;
-      }
+      const hintY = titleRowY(rows.length - 1) + 34;
       ctx.fillStyle = COLOR.TEXT_DIM;
       ctx.font = '11px "Helvetica Neue", Arial, sans-serif';
+      ctx.fillText(titleHint(rows[hud.titleIndex], hud.boardIsLoaded), PLAYFIELD_W / 2, hintY);
       ctx.fillText(
-        'Z / ⁄ flippers · SPACE plunger · C/N nudge · M mute',
+        'FLIPPERS MOVE · START SELECTS · or tap a row',
         PLAYFIELD_W / 2,
-        hud.boardCount > 1 ? 664 : 634,
+        hintY + 18,
       );
       return;
     }
@@ -2615,4 +2607,21 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number):
   let s = text;
   while (s.length > 1 && ctx.measureText(`${s}…`).width > maxWidth) s = s.slice(0, -1);
   return `${s}…`;
+}
+
+/** What the highlighted row will do, said plainly. A menu whose rows are verbs
+ *  still owes the player the consequence — especially "this one reloads". */
+function titleHint(row: TitleRow | undefined, boardIsLoaded: boolean): string {
+  switch (row?.kind) {
+    case 'play':
+      return boardIsLoaded
+        ? 'start a game on the board shown below'
+        : 'starts by reloading onto the board shown below';
+    case 'board':
+      return 'start cycles to the next board';
+    case 'edit':
+      return 'open the drag-and-drop layout builder';
+    default:
+      return '';
+  }
 }
