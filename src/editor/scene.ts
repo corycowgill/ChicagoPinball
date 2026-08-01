@@ -1,10 +1,15 @@
 /** The editor's model of a board: the real world, built and indexed.
  *
  *  The editor does not draw from the layout descriptors. It builds the actual
- *  physics world through `buildPlayfield` and draws THAT — the same bodies the
- *  game collides against, with the same decomposition, chamfers and derived
- *  geometry. So what you see while dragging is not an approximation of the
- *  board; it is the board.
+ *  playfield and draws THAT — the same bodies the game collides against, with
+ *  the same decomposition, chamfers and derived geometry. So what you see
+ *  while dragging is not an approximation of the board; it is the board.
+ *
+ *  It builds a whole `Playfield` rather than a bare body set, which costs a
+ *  couple of milliseconds more per edit and buys the thing that matters: the
+ *  collision wiring. A test ball dropped in the editor meets bumpers that pop,
+ *  slingshots that fire, ramps that carry it and scoops that swallow it —
+ *  because it is playing the real game, just without a player.
  *
  *  That also means the editor gets every element kind for free: a ramp's
  *  plate, the captive's lane walls, the bank's seven targets are all just
@@ -12,13 +17,14 @@
  */
 import Matter from 'matter-js';
 import { Physics } from '../Physics';
-import { buildPlayfield } from '../layout/build';
+import { Playfield, PlayfieldEvents } from '../scene/Playfield';
 import { resolveLayout, ResolvedLayout } from '../layout/resolve';
 import { Diagnostic, validateLayout } from '../layout/validate';
 import { validateRules } from '../layout/feasible';
 import { allHandles, Handle } from '../layout/handles';
 import { pointToSegment } from '../layout/geometry';
 import { PlayfieldLayout, Pt } from '../layout/types';
+import { ScoreEvent } from '../types';
 
 export interface EditorScene {
   resolved: ResolvedLayout;
@@ -28,16 +34,32 @@ export interface EditorScene {
   diagnostics: Diagnostic[];
   /** Ids named by at least one diagnostic, for the offender highlight. */
   flagged: Set<string>;
-  /** Set when the layout is broken badly enough that the loader threw. The
-   *  editor keeps the previous scene and shows this, rather than dying. */
-  error?: string;
+  /** The live world. Static until the editor steps it for a test ball. */
+  physics: Physics;
+  playfield: Playfield;
+  /** Scoring events the test ball has caused, oldest first. */
+  events: ScoreEvent[];
 }
 
 export function buildScene(layout: PlayfieldLayout): EditorScene {
   const resolved = resolveLayout(layout);
   const bodiesById = new Map<string, Matter.Body[]>();
   const physics = new Physics();
-  buildPlayfield(physics, resolved, (id, bodies) => {
+  const events: ScoreEvent[] = [];
+  // Everything a running Playfield can report is collected; the editor shows
+  // it so a test ball tells you what your board SCORES, not just where the
+  // ball rolls. Drains and outlanes are recorded as events too, because on a
+  // half-built board those are the interesting ones.
+  const ev: PlayfieldEvents = {
+    onScore: (e) => events.push(e),
+    onDrain: () => events.push({ kind: 'drain' as never, points: 0 }),
+    onLockComplete: () => events.push({ kind: 'lock', points: 0 }),
+    onScoopMode: () => {},
+    onLanesComplete: () => {},
+    onLeftOutlane: () => events.push({ kind: 'left-outlane' as never, points: 0 }),
+    onRightOutlane: () => events.push({ kind: 'right-outlane' as never, points: 0 }),
+  };
+  const playfield = new Playfield(physics, ev, layout, (id, bodies) => {
     // Two descriptors may share an id in a half-edited layout; concatenating
     // keeps both selectable instead of silently dropping one.
     bodiesById.set(id, [...(bodiesById.get(id) ?? []), ...bodies]);
@@ -48,7 +70,16 @@ export function buildScene(layout: PlayfieldLayout): EditorScene {
   const diagnostics = [...validateLayout(resolved), ...validateRules(layout)];
   const flagged = new Set<string>();
   for (const d of diagnostics) for (const id of d.elementIds) flagged.add(id);
-  return { resolved, bodiesById, handles: allHandles(resolved), diagnostics, flagged };
+  return {
+    resolved,
+    bodiesById,
+    handles: allHandles(resolved),
+    diagnostics,
+    flagged,
+    physics,
+    playfield,
+    events,
+  };
 }
 
 /** Build, or report why not. A layout mid-edit can be genuinely unbuildable
