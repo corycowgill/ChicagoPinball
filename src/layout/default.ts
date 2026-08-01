@@ -346,8 +346,36 @@ export const DEFAULT_LAYOUT: PlayfieldLayout = {
     { kind: 'sensor', id: 'inlane-left', role: 'inlane-left', x: 63, y: 712, w: 34, h: 12 },
     { kind: 'sensor', id: 'inlane-right', role: 'inlane-right', x: PLAY_RIGHT - 63, y: 712, w: 34, h: 12 },
     { kind: 'sensor', id: 'right-outlane', role: 'right-outlane', x: 459, y: 884, w: 38, h: 10 },
-    { kind: 'sensor', id: 'left-loop', role: 'left-loop', x: 20, y: 340, w: 34, h: 10 },
-    { kind: 'sensor', id: 'right-loop', role: 'right-loop', x: 462, y: 340, w: 34, h: 10 },
+    // The loop switches, 62% of the way up each orbit lane.
+    //
+    // They used to sit at y=340, which is not "high in the lane" — it is the
+    // lane's declared TOP, the exact endpoint of the loop-channel corridor,
+    // 208px above the mouth at y=548. A full-power flipper shot leaves the
+    // bat at ~20px/frame, giving vy about -14 and therefore v^2/2g ~= 196px
+    // of climb, BEFORE it has spent anything crossing the board. The switch
+    // was out of reach by construction: not a hard shot, an impossible one.
+    // tools/shotreach.mts scored the two orbits at 1/96 and 2/96, the worst
+    // live shots on the board, and they light the 2x/3x playfield and start
+    // two of the five sports modes.
+    //
+    // Four hypotheses died to the measurement before this one, each an
+    // "obvious" blocker that changed nothing when removed:
+    //   - the one-way return gates guarding the mouth   (deleting them: no change)
+    //   - the loop handler's vy < -4 requirement        (23 of 26 sensor
+    //     touches are RAMP TRANSITS flying over the lane at a scripted
+    //     vy of +0.3, correctly ignored — the handler was right)
+    //   - the sensor's x-band being too narrow          (it is not)
+    //   - a missing entry guide to turn a cross-board shot up the lane
+    //     (five placements tested; none moved either orbit, and two of them
+    //     cut outlane reachability from 22% to 3%)
+    //
+    // 62% is the STRICTEST position that a good shot can actually reach:
+    // y=420, 440 and 460 all measure the same 4/3, so this asks the most of
+    // the shot for the same reward rather than the least.
+    //
+    //     left orbit   1/96 -> 4/96      right orbit   2/96 -> 3/96
+    { kind: 'sensor', id: 'left-loop', role: 'left-loop', x: 20, y: 420, w: 34, h: 10 },
+    { kind: 'sensor', id: 'right-loop', role: 'right-loop', x: 462, y: 420, w: 34, h: 10 },
 
     { kind: 'drain', id: 'drain', y: PLAYFIELD_H - 4, h: 6, inset: 12 },
   ],
