@@ -94,6 +94,7 @@ async function arm(mode) {
 async function run(page, mode) {
   const tries = [];
   let saved = 0;
+  let escaped = 0;
   let done = 0;
   for (let t = 0; t < TRIALS; t++) {
     let r;
@@ -125,12 +126,27 @@ async function run(page, mode) {
           pf.lastKickbackAt = -1000;
           pf.fireKickback(ball);
 
+          // TWO questions, and they are not the same one.
+          //
+          // `returned` is the kicker's own job: did the ball leave the outlane
+          // and stay out? A return shows up as the retry logic firing again,
+          // so the attempt counter rising is the signal.
+          //
+          // `drained` is whether the ball was still in play at the end — and
+          // with nobody at the flippers that is nearly always false, so it
+          // cannot be the pass criterion on its own. Using only it scored a
+          // kicker that repeatedly re-fired a ball INSIDE the outlane higher
+          // than one that punched it out to the flipper first time. That was
+          // measuring the ball being kept busy, not saved.
+          const startTries = g.kickbackTries ?? 0;
           const until = g.timeMs + watchMs;
+          let drained = false;
           while (g.timeMs < until) {
             await sleep(50);
-            if (g.state !== 'PLAYING') return { drained: true, tries: g.kickbackTries ?? -1 };
+            if (g.state !== 'PLAYING') { drained = true; break; }
           }
-          return { drained: false, tries: g.kickbackTries ?? -1 };
+          const tries = g.kickbackTries ?? 0;
+          return { drained, returned: tries > startTries, tries };
         },
           [mode, WATCH_MS],
         ),
@@ -144,9 +160,10 @@ async function run(page, mode) {
     }
     done++;
     if (!r.drained) saved++;
+    if (!r.returned) escaped++;
     tries.push(r.tries);
   }
-  return { saved, total: done, tries };
+  return { saved, escaped, total: done, tries };
 }
 
 const MODE = process.env.MODE || 'retry';
@@ -154,9 +171,10 @@ if (MODE !== 'retry' && MODE !== 'oneshot') {
   throw new Error(`MODE must be 'retry' or 'oneshot', got '${MODE}'`);
 }
 const r = await arm(MODE);
-const pct = ((r.saved / r.total) * 100).toFixed(0);
-console.log(`kickback save rate — ${MODE}`);
-console.log(`  saved ${r.saved}/${r.total}  (${pct}%)`);
+const p = (n) => `${((n / r.total) * 100).toFixed(0)}%`;
+console.log(`kickback — ${MODE}`);
+console.log(`  left the outlane and stayed out : ${r.escaped}/${r.total} (${p(r.escaped)})`);
+console.log(`  still in play after the window  : ${r.saved}/${r.total} (${p(r.saved)})`);
 console.log(`  attempts used per trial: ${r.tries.join(',')}`);
 console.log(
   '\n  attempts of 0 mean the award was retired because the save held;\n' +

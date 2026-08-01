@@ -68,6 +68,15 @@ export const BACKBOX_BOTTOM = 60;
 export const HUD_BOTTOM = 130;
 export const PLAYFIELD_TOP = 200; // start of the playable surface proper
 
+/** How much of a margin around a gate counts as "at" it.
+ *
+ *  A plain radius was too generous: at 90px a slingshot reject rising 88px
+ *  away held the gate open and sailed into the orbit lane, which quietly
+ *  starved the outlane of its last feed. Testing the gate's own BOUNDS instead
+ *  keeps it local — a ball only opens the gate it is actually passing
+ *  through. */
+const GATE_MARGIN = 26;
+
 export class Playfield {
   balls: Ball[];
   leftFlipper: Flipper;
@@ -87,6 +96,8 @@ export class Playfield {
   standups: StandupTarget[];
 
   walls: WallDef[];
+  /** One-way gates: solid to falling balls, open to climbing ones. */
+  gates: Matter.Body[];
   postPositions: { x: number; y: number; r?: number }[];
   private resolved: ResolvedLayout;
   drainSensor: Matter.Body;
@@ -172,12 +183,14 @@ export class Playfield {
     this.rollovers = parts.rollovers;
     this.standups = parts.standups;
     this.walls = parts.walls;
+    this.gates = parts.gates;
     this.postPositions = parts.postPositions;
     this.drainSensor = parts.drainSensor;
     this.launchRestY = this.resolved.frame.launchRestY;
 
     // ── Per-step ticks ──
     physics.beforeUpdate(() => {
+      this.tickGates();
       this.leftFlipper.tick();
       this.rightFlipper.tick();
       for (const b of this.balls) {
@@ -200,6 +213,37 @@ export class Playfield {
 
 
   // ── Collision routing ────────────────────────────────────────────────────
+
+  /** Open every gate a ball is currently climbing through.
+   *
+   *  A one-way gate is solid to a falling ball and swings open for a climbing
+   *  one. Rather than model a hinge, the body is made a sensor while a ball
+   *  near it is moving up — which is not an approximation of the real part but
+   *  a description of it: a physical gate held open by one ball IS open to any
+   *  other that arrives while it is. */
+  private tickGates() {
+    for (const g of this.gates) {
+      let open = false;
+      for (const b of this.balls) {
+        if ((b.body as unknown as { $transit?: boolean }).$transit) continue;
+        const v = Matter.Body.getVelocity(b.body);
+        if (v.y >= -0.5) continue; // not climbing
+        // At this gate only: a ball climbing elsewhere on the board must not
+        // hold it open.
+        const p = b.body.position;
+        if (
+          p.x > g.bounds.min.x - GATE_MARGIN &&
+          p.x < g.bounds.max.x + GATE_MARGIN &&
+          p.y > g.bounds.min.y - GATE_MARGIN &&
+          p.y < g.bounds.max.y + GATE_MARGIN
+        ) {
+          open = true;
+          break;
+        }
+      }
+      g.isSensor = open;
+    }
+  }
 
   private wireCollisions() {
     const physics = this.physics;
