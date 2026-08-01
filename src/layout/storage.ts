@@ -117,6 +117,153 @@ export function clearStorage() {
   }
 }
 
+// ── The board library ──────────────────────────────────────────────────────
+//
+// One saved layout was enough while the editor was the only thing reading it.
+// A title screen that lets you PICK a board needs a list, and it needs the
+// choice to be explicit: the first version of this simply preferred whatever
+// was in storage, so saving a board in the editor silently replaced the game
+// for good and `?stock` in the URL was the only way back. That is a trap, not
+// a feature. The selection below is a separate key that the player sets.
+
+export const LIBRARY_KEY = 'chicago-pinball-boards';
+export const SELECTED_KEY = 'chicago-pinball-board';
+
+/** The shipped board. Reserved: never stored, always offered, always first. */
+export const STOCK_ID = 'stock';
+/** The editor's live draft. Reserved so "Play this board" has a stable slot. */
+export const DRAFT_ID = 'working';
+
+export interface BoardEntry {
+  id: string;
+  name: string;
+  savedAt: string;
+}
+
+type Library = Record<string, LayoutFile>;
+
+function readLibrary(): Library {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(LIBRARY_KEY);
+  } catch {
+    return {};
+  }
+  let lib: Library = {};
+  if (raw) {
+    try {
+      const v = JSON.parse(raw) as unknown;
+      if (v && typeof v === 'object') lib = v as Library;
+    } catch {
+      // A corrupt library must not cost the player their other boards' worth
+      // of confidence in the game booting. Start empty; the migration below
+      // still recovers the single legacy slot.
+      lib = {};
+    }
+  }
+  // Migrate the pre-library single slot. Only ever runs once, because the
+  // write below puts it in the library and the legacy key is then ignored.
+  if (!lib[DRAFT_ID]) {
+    const legacy = loadFromStorage();
+    if (legacy) {
+      lib[DRAFT_ID] = legacy;
+      writeLibrary(lib);
+    }
+  }
+  return lib;
+}
+
+function writeLibrary(lib: Library): boolean {
+  try {
+    localStorage.setItem(LIBRARY_KEY, JSON.stringify(lib));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Every saved board, newest first. The stock board is NOT in here — it has no
+ *  stored form, and callers add it themselves so it cannot be deleted. */
+export function listBoards(): BoardEntry[] {
+  const lib = readLibrary();
+  return Object.entries(lib)
+    .map(([id, f]) => ({ id, name: f.name || id, savedAt: f.savedAt || '' }))
+    .sort((a, b) => (a.savedAt < b.savedAt ? 1 : a.savedAt > b.savedAt ? -1 : 0));
+}
+
+export function loadBoard(id: string): LayoutFile | null {
+  if (id === STOCK_ID) return null;
+  return readLibrary()[id] ?? null;
+}
+
+export function saveBoard(id: string, layout: PlayfieldLayout, name: string): boolean {
+  const lib = readLibrary();
+  lib[id] = toFile(layout, name, new Date().toISOString());
+  return writeLibrary(lib);
+}
+
+export function deleteBoard(id: string): boolean {
+  const lib = readLibrary();
+  if (!lib[id]) return false;
+  delete lib[id];
+  return writeLibrary(lib);
+}
+
+/** Which board the player chose at the title screen. Defaults to stock — a
+ *  board only becomes the one you play because you picked it. */
+export function selectedBoardId(): string {
+  try {
+    return localStorage.getItem(SELECTED_KEY) || STOCK_ID;
+  } catch {
+    return STOCK_ID;
+  }
+}
+
+export function setSelectedBoardId(id: string) {
+  try {
+    localStorage.setItem(SELECTED_KEY, id);
+  } catch {
+    /* the choice just will not survive a reload */
+  }
+}
+
+/** Picking a different board on the title screen has to reload, and the
+ *  player pressed START, not REFRESH — so the intent to start rides across in
+ *  sessionStorage and is consumed exactly once. sessionStorage rather than
+ *  localStorage: reopening the game tomorrow should land on the title screen,
+ *  not drop you into a live ball. */
+const AUTOSTART_KEY = 'chicago-pinball-autostart';
+
+export function armAutostart() {
+  try {
+    sessionStorage.setItem(AUTOSTART_KEY, '1');
+  } catch {
+    /* the swap still works, it just lands on the title screen */
+  }
+}
+
+export function takeAutostart(): boolean {
+  try {
+    const on = sessionStorage.getItem(AUTOSTART_KEY) === '1';
+    sessionStorage.removeItem(AUTOSTART_KEY);
+    return on;
+  } catch {
+    return false;
+  }
+}
+
+/** A fresh id for a named save, unique within the library. */
+export function uniqueBoardId(name: string): string {
+  const base =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'board';
+  const lib = readLibrary();
+  if (!lib[base] && base !== STOCK_ID && base !== DRAFT_ID) return base;
+  for (let i = 2; ; i++) if (!lib[`${base}-${i}`]) return `${base}-${i}`;
+}
+
 /** A deep copy. Layouts are pure data, so this is both correct and the
  *  cheapest way to snapshot one for undo. */
 export function cloneLayout(l: PlayfieldLayout): PlayfieldLayout {
