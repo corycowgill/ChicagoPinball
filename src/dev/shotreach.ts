@@ -275,3 +275,70 @@ export function formatMap(t: ShotTable): string {
     .map((r) => `  ${r.target.padEnd(12)} ${r.fracs}`)
     .join('\n');
 }
+
+/** The shipped board's make counts, and a floor under them.
+ *
+ *  Every number here was won by a geometry change, and until now nothing
+ *  stopped the next change giving one back. That is not hypothetical: moving
+ *  the soccer posts 22px took right-orbit returns from 100% to 12%, and the
+ *  only reason it was caught is that `orbitreturn` happened to be run by hand.
+ *
+ *  The `shotLines` baselines in src/layout/default.ts do NOT cover this, and
+ *  the reason is worth stating because it is easy to assume otherwise: they
+ *  measure the CLEARANCE of a straight line, which is a different quantity.
+ *  Re-aiming the soccer goal moved the mode scoop's make rate 1 -> 6 while its
+ *  shot-line clearance went -9 -> -10. A board can pass every clearance rule
+ *  in the validator with a dead shot on it.
+ *
+ *  ── This is a property of ONE HARNESS VERSION, not of the board ──────────
+ *  Change FRACS, DWELLS, HOLD_STEPS or MAX_STEPS and every number below moves,
+ *  because they define what a "cell" is. Re-seed deliberately when the harness
+ *  changes — the same rule tools/baseline.mts follows for shotLines — and
+ *  never by pasting whatever the tool last printed.
+ */
+export const BASELINE: Record<string, number> = {
+  'ramp:L': 11,
+  'ramp:R': 12,
+  'loop:L': 4,
+  'loop:R': 3,
+  scoop: 6,
+  'lake-bonus': 12,
+  // The board's one knife-edge shot, and it is knife-edge by a trade rather
+  // than by an oversight. `soccer-post-s` sits 10.3px off the left flipper's
+  // line to the captive, and it is also the funnel that makes the mode scoop
+  // work. Measured: delete it and captive goes 1 -> 4 while scoop goes 6 -> 1.
+  // A sweep of 8x8 positions found exactly ONE that holds the scoop at 6, it
+  // is the position already shipped, and it scores captive 0. The two shots
+  // are mutually exclusive here, and the mode scoop starts City Tour and four
+  // of the five sports modes. Deleting the mode scoop outright leaves the
+  // captive at 1, so its capture circle was never the blocker either.
+  captive: 1,
+  lock: 5,
+  'drop-target': 10,
+  standup: 14,
+  spinner: 12,
+  'pop-bumper': 10,
+};
+
+export interface Regression {
+  target: string;
+  was: number;
+  now: number;
+}
+
+/** Every target that scores BELOW its baseline. Empty means no regression.
+ *
+ *  Only decreases fail. A change that improves a shot is not a problem to be
+ *  reported, it is the point — but it does mean the baseline is stale, so
+ *  improvements are listed separately for re-seeding. */
+export function checkBaseline(t: ShotTable): { worse: Regression[]; better: Regression[] } {
+  const worse: Regression[] = [];
+  const better: Regression[] = [];
+  for (const r of t.rows) {
+    const was = BASELINE[r.target];
+    if (was === undefined) continue;
+    if (r.made < was) worse.push({ target: r.target, was, now: r.made });
+    else if (r.made > was) better.push({ target: r.target, was, now: r.made });
+  }
+  return { worse, better };
+}

@@ -136,6 +136,23 @@ npx esbuild tools/validate.mts   --bundle --platform=node --format=esm --outfile
   it can resolve a single shot's change; unlike `validate.mts` it measures the
   shot rather than a straight line drawn where the shot might go.
 
+  **`CHECK=1` is the regression gate — run it after any geometry change.**
+  It compares every row against `BASELINE` in `src/dev/shotreach.ts` and exits
+  non-zero if a shot went backwards. Nothing else catches this: the clearance
+  rules in `validate.mts` measure a straight line's gap, which is a different
+  quantity, and re-aiming the soccer goal once moved the mode scoop's make
+  rate 1 → 6 while its shot-line clearance went −9 → −10. A board can pass
+  every rule in the validator with a dead shot on it.
+
+  The gate carries its own negative control and runs it every time: it deletes
+  the left ramp and confirms the gate fires. A guard that cannot fail reads as
+  coverage while providing none.
+
+  The baseline belongs to **one harness version**. Change `FRACS`, `DWELLS`,
+  `HOLD_STEPS` or `MAX_STEPS` and every number moves, because they define what
+  a cell is — re-seed deliberately, never by pasting what the tool last
+  printed.
+
   `CONTROLS=1` deletes each target in turn and checks its row falls to zero —
   ten of twelve rows are controllable and all ten fall.
 

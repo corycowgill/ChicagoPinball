@@ -329,6 +329,35 @@ export const DEFAULT_LAYOUT: PlayfieldLayout = {
     // and fed the right outlane — draining as a reward for making the shot.
     { kind: 'scoop', id: 'scoop-mode', label: 'scoop', x: PLAY_RIGHT - 80, y: 545, kickAngle: -Math.PI / 2 - 0.2, kickSpeed: 13 },
 
+    // The captive is a 1/96 shot on tools/shotreach.mts and it STAYS one, on
+    // purpose. Four explanations for it have now been killed by a null test:
+    //
+    //   - the right ramp's funnel rail and post. Once the clearance rules
+    //     could see rails at all this measured -11.8px, and it is the reason
+    //     the whole obstacle model was rewritten. It now clears by +3.8 and
+    //     the captive did not move.
+    //   - the captive's own mouth. Widened to 90% in isolation
+    //     (captivereach's aperture band); the shot did not move.
+    //   - the mode scoop's capture circle, which Playfield's own comment
+    //     names as the thing that "shadows the left-flipper->captive
+    //     corridor". Delete the mode scoop entirely and the captive stays at
+    //     1/96. It was never the blocker.
+    //   - the right flipper. Its line runs through its own slingshot, so that
+    //     shot does not exist and no amount of tuning creates it.
+    //
+    // What IS the blocker is `soccer-post-s`, 10.3px off the left flipper's
+    // line — and that post is the funnel that took the mode scoop from 1/96
+    // to 6/96. Measured trade: delete it and captive goes 1 -> 4 while scoop
+    // goes 6 -> 1. A sweep of 64 positions found exactly one that holds the
+    // scoop at 6; it is the position already shipped, and it scores captive 0.
+    //
+    // So the two shots are mutually exclusive in this quadrant, and the mode
+    // scoop wins: it starts City Tour and four of the five sports modes,
+    // against the captive's 3000 and a spotted CHICAGO letter. Keeping the
+    // post is also better on raw count (6+1 against 1+4).
+    //
+    // Do not "fix" this without re-running the trade. It has been attempted
+    // three times.
     { kind: 'captive', id: 'captive', x: 420, y: 494 },
     { kind: 'spinner', id: 'spinner', cx: 63, cy: 678, length: 34 },
 
