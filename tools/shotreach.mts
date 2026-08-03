@@ -1,6 +1,7 @@
 /** Node entry: which shots can this board make, and from where on the bat?
  *
  *    npx tsx tools/shotreach.mts              # the shipped board
+ *    CHECK=1 npx tsx tools/shotreach.mts      # gate: fail if a shot regressed
  *    CONTROLS=1 npx tsx tools/shotreach.mts   # + the positive controls (slow)
  *
  *  The controls are the reason to trust the table. For each target, delete it
@@ -8,9 +9,14 @@
  *  steady. A table that cannot be made to fall is not measuring the board —
  *  and every instrument in this repo produced exactly that result before it
  *  produced a right one.
+ *
+ *  CHECK=1 is the regression gate. Run it after any geometry change: the
+ *  clearance rules in validate.ts will not catch a shot going dead, because
+ *  they measure a straight line's clearance and not whether the shot can be
+ *  made. See BASELINE in src/dev/shotreach.ts.
  */
 import { DEFAULT_LAYOUT } from '../src/layout/default';
-import { formatMap, formatTable, shotTable, TARGETS } from '../src/dev/shotreach';
+import { checkBaseline, formatMap, formatTable, shotTable, TARGETS } from '../src/dev/shotreach';
 import { ElementDesc, PlayfieldLayout, StaticDesc } from '../src/layout/types';
 
 const base = shotTable();
@@ -21,6 +27,40 @@ console.log(
 console.log(formatTable(base));
 console.log('\nwhere each shot lives on the bat:');
 console.log(formatMap(base));
+
+if (process.env.CHECK === '1') {
+  const { worse, better } = checkBaseline(base);
+  console.log('\n── regression gate ─────────────────────────────────────────');
+  for (const r of worse) {
+    console.log(`  REGRESSED  ${r.target.padEnd(12)} ${r.was} -> ${r.now}`);
+  }
+  for (const r of better) {
+    console.log(`  improved   ${r.target.padEnd(12)} ${r.was} -> ${r.now}  (re-seed BASELINE)`);
+  }
+  if (!worse.length && !better.length) console.log('  every shot at its baseline');
+
+  // The gate's own negative control, run every time rather than trusted. A
+  // guard that cannot fail reads as coverage while providing none — the same
+  // reason rulecheck carries must-stay-silent cases and partscheck carries a
+  // six-target CHICAGO bank. Delete the left ramp; ramp:L must go to zero and
+  // the gate must say so.
+  const broken = {
+    ...DEFAULT_LAYOUT,
+    elements: DEFAULT_LAYOUT.elements.filter(
+      (e) => !(e.kind === 'ramp' && e.label === 'left-ramp'),
+    ),
+  };
+  const fired = checkBaseline(shotTable(broken)).worse;
+  console.log(
+    fired.length
+      ? `  control: gate fires on a board with the left ramp deleted (${fired
+          .map((r) => `${r.target} ${r.was}->${r.now}`)
+          .join(', ')})`
+      : '  CONTROL FAILED: the gate did not fire on a deliberately broken board,\n' +
+          '           so a clean run above means nothing.',
+  );
+  if (worse.length || !fired.length) process.exitCode = 1;
+}
 
 if (process.env.CONTROLS === '1') {
   // Which descriptor to remove to kill each target. Anything not listed here
