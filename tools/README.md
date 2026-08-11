@@ -169,6 +169,24 @@ npx esbuild tools/validate.mts   --bundle --platform=node --format=esm --outfile
   where the ball is off the end of the bat and launch speed falls from 20.1 to
   9.3 with the angle going negative.
 
+- **`dmdcheck.mts`** — do the DMD clips draw, and do they move? Steps every
+  clip in `src/DmdClips.ts` across its duration and counts lit dots per frame.
+  Runs headless with no canvas at all: `Dmd` keeps drawing and blitting
+  separate, so the dot buffer is reachable under Node and the answer is an
+  integer rather than a judgement about a picture.
+
+  It catches the two failure modes a screenshot misses. A **blank** clip looks
+  identical to no clip — the panel just shows whatever the text pass put
+  there. A **frozen** clip looks deliberate. Counting dots is not enough for
+  the second one, because a puck sliding across lights the same number of dots
+  every frame, so the frozen test hashes the buffer instead.
+
+  Controls run every time: an empty panel must read 0 dots, and a clip that
+  draws nothing must be reported. It has already earned this — it caught
+  `Dmd.dot()` silently dropping fractional coordinates (`buf[3.5]` on a typed
+  array is a no-op), which showed up as two frames of the jackpot burst
+  reading zero while the frames either side read 98.
+
 - **`partscheck.mts`** — can every part of the board actually be added and
   removed? For each kind on the shipped board: delete all of it, build the
   real world, step it 240 frames. For each palette entry: add one, build,
