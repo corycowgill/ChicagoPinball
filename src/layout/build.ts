@@ -309,7 +309,14 @@ export function buildPlayfield(
 }
 
 /** Somewhere no ball will ever be, and nothing will ever be drawn. */
-const OFFSTAGE = { x: -4000, y: -4000 };
+export const OFFSTAGE = { x: -4000, y: -4000 };
+
+/** Is this point on the table, or is it a stand-in parked off it?
+ *
+ *  Exported because absence has to be legible at RUNTIME, not just at build
+ *  time: the machine's callouts name features by name ("SUPER SKILL AT THE
+ *  BEAN") and must not name one the board does not have. */
+export const onTable = (p: { x: number; y: number }) => p.x > -1000;
 
 /** Fill in every singleton the board did not describe, WITHOUT adding a
  *  single body to the world.

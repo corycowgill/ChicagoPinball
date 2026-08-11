@@ -83,9 +83,25 @@ function sanitize(text: string): string {
     .replace(/[^0-9A-Z \-+.,!?/:'*()]/g, ' ');
 }
 
+/** A short animation for the panel.
+ *
+ *  A function of elapsed time, not a list of baked frames. A ball arcing
+ *  across 128 dots is arithmetic; as bitmaps it would be twenty rows of hex
+ *  per clip and impossible to retime. `draw` is called with `t` in [0, ms]
+ *  and may assume nothing about what else is on the panel — the caller
+ *  decides whether to clear first. */
+export interface DmdClip {
+  id: string;
+  /** Total duration in ms. The runner drops the clip once t passes it. */
+  ms: number;
+  draw: (d: Dmd, t: number) => void;
+}
+
 export class Dmd {
   /** Clock driving the marquee scroll of over-long lines. */
   private scrollMs = 0;
+  private clip: DmdClip | null = null;
+  private clipMs = 0;
   readonly cols = COLS;
   readonly rows = ROWS;
   private buf = new Uint8Array(COLS * ROWS);
@@ -95,8 +111,40 @@ export class Dmd {
     this.buf.fill(0);
   }
 
+  /** Lit dots in the current frame, and a hash of which ones.
+   *
+   *  For src/dev/dmdcheck.ts, which steps every clip headless. A clip that
+   *  draws nothing and a clip that never ran look identical on screen; both
+   *  are obvious here. The count alone is not enough — a puck sliding across
+   *  lights the same number of dots every frame — so the signature exists to
+   *  tell motion from a freeze. */
+  litCount(): number {
+    let n = 0;
+    for (let i = 0; i < this.buf.length; i++) n += this.buf[i];
+    return n;
+  }
+
+  signature(): string {
+    let h = 2166136261;
+    for (let i = 0; i < this.buf.length; i++) {
+      h ^= this.buf[i] * (i % 251);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0).toString(16);
+  }
+
+  /** Light a dot. Coordinates are ROUNDED, and that is load-bearing.
+   *
+   *  This used to index the buffer with whatever it was given. Every caller
+   *  inside this file passes integers, so it went unnoticed — but a clip
+   *  animating a ball along an arc passes floats, and `buf[3.5]` on a typed
+   *  array is a silent no-op. The dot does not land and nothing reports it.
+   *  src/dev/dmdcheck.ts caught it as two frames of the jackpot burst reading
+   *  zero lit dots while the frames either side read 98. */
   dot(x: number, y: number) {
-    if (x >= 0 && x < COLS && y >= 0 && y < ROWS) this.buf[y * COLS + x] = 1;
+    const px = Math.round(x);
+    const py = Math.round(y);
+    if (px >= 0 && px < COLS && py >= 0 && py < ROWS) this.buf[py * COLS + px] = 1;
   }
 
   textWidth(text: string): number {
@@ -145,9 +193,33 @@ export class Dmd {
     this.text(s, -shift, y, 0);
   }
 
-  /** Advance the marquee clock (called once per frame by the renderer). */
+  /** Advance the marquee clock and any running clip (once per frame). */
   tick(dtMs: number) {
     this.scrollMs += dtMs;
+    if (this.clip) {
+      this.clipMs += dtMs;
+      if (this.clipMs >= this.clip.ms) this.clip = null;
+    }
+  }
+
+  /** Start a clip, replacing whatever was running.
+   *
+   *  Replacing rather than queueing on purpose: a clip is a reaction to
+   *  something that just happened, and a queue would play the reaction to a
+   *  shot several seconds after the shot. */
+  playClip(c: DmdClip) {
+    this.clip = c;
+    this.clipMs = 0;
+  }
+
+  clipActive(): boolean {
+    return this.clip !== null;
+  }
+
+  /** Compose the running clip's current frame. No-op when none is running,
+   *  so the caller can always ask. */
+  drawClip() {
+    this.clip?.draw(this, this.clipMs);
   }
 
   rightText(str: string, y: number, rightX = COLS - 2) {
@@ -169,9 +241,63 @@ export class Dmd {
   }
 
   capone(x: number, y: number) {
-    for (let r = 0; r < CAPONE_SPRITE.length; r++) {
-      for (let c = 0; c < 12; c++) {
-        if (CAPONE_SPRITE[r] & (1 << (11 - c))) this.dot(x + c, y + r);
+    this.sprite(CAPONE_SPRITE, 12, x, y);
+  }
+
+  /** Blit a bitmap sprite: one number per row, `w` bits wide, MSB left.
+   *
+   *  This is `capone()` with the 12 taken out. It stayed hardcoded because
+   *  Capone was the only sprite the panel had — which is the thing this pass
+   *  is about. `capone()` now calls straight through, so the wizard-mode
+   *  display cannot drift from what it drew before. */
+  sprite(rows: number[], w: number, x: number, y: number) {
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < w; c++) {
+        if (rows[r] & (1 << (w - 1 - c))) this.dot(x + c, y + r);
+      }
+    }
+  }
+
+  /** Bresenham. A net, a goalpost and a diamond are lines; hand-authoring
+   *  them as bitmaps would be a lot of hex for shapes the panel can just
+   *  compute, and they have to move. */
+  line(x0: number, y0: number, x1: number, y1: number) {
+    let x = Math.round(x0);
+    let y = Math.round(y0);
+    const ex = Math.round(x1);
+    const ey = Math.round(y1);
+    const dx = Math.abs(ex - x);
+    const dy = -Math.abs(ey - y);
+    const sx = x < ex ? 1 : -1;
+    const sy = y < ey ? 1 : -1;
+    let err = dx + dy;
+    for (;;) {
+      this.dot(x, y);
+      if (x === ex && y === ey) break;
+      const e2 = 2 * err;
+      if (e2 >= dy) {
+        err += dy;
+        x += sx;
+      }
+      if (e2 <= dx) {
+        err += dx;
+        y += sy;
+      }
+    }
+  }
+
+  /** Midpoint circle outline. `fill` for a ball, hollow for a hoop. */
+  circle(cx: number, cy: number, r: number, fill = false) {
+    if (r <= 0) {
+      this.dot(Math.round(cx), Math.round(cy));
+      return;
+    }
+    for (let yy = -r; yy <= r; yy++) {
+      for (let xx = -r; xx <= r; xx++) {
+        const d = Math.hypot(xx, yy);
+        if (fill ? d <= r + 0.3 : Math.abs(d - r) < 0.6) {
+          this.dot(Math.round(cx + xx), Math.round(cy + yy));
+        }
       }
     }
   }

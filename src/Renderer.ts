@@ -138,6 +138,10 @@ export interface HudInfo {
   initials: string;
   initialsPos: number;
   bossLit: boolean;
+  /** Does this board actually have a mode scoop? The showdown is collected
+   *  there, and the editor can delete it — in which case the panel must not
+   *  send the player to a hole that is not on the table. */
+  hasModeScoop: boolean;
   bossActive: boolean;
   bossHp: number;
   bossMsLeft: number;

@@ -103,6 +103,10 @@ function newPlayer(): PlayerState {
 export interface GameRenderer {
   pushToast(text: string, color?: string, ttl?: number): void;
   triggerJackpotFlash(): void;
+  /** Play a named DMD animation. The sports modes and the jackpot ride
+   *  hooks that already exist (sportEvent, triggerJackpotFlash); these are
+   *  the two moments that had none. */
+  playClip(id: 'multiball' | 'chicago'): void;
   kick(amp: number): void;
   /** Attraction feedback: goal lights, bat swings, net flashes. */
   sportEvent(sportIdx: number, type: 'start' | 'hit' | 'complete'): void;
@@ -548,7 +552,10 @@ export class Game {
         this.renderer.pushToast('MYSTERY: BALL SAVE', COLOR.NEON_GREEN, 1500);
       },
       () => {
-        if (!this.kickbackLit) {
+        // The kickback fires from the left outlane; without one there is
+        // nothing to light, so pay the points instead of naming a feature
+        // this board does not have.
+        if (!this.kickbackLit && this.playfield.hasSensor('left-outlane')) {
           this.kickbackLit = true;
           this.renderer.pushToast('MYSTERY: KICKBACK LIT', COLOR.NEON_GREEN, 1500);
         } else {
@@ -557,7 +564,7 @@ export class Game {
         }
       },
       () => {
-        if (!this.expressLit) {
+        if (!this.expressLit && this.playfield.hasSensor('right-outlane')) {
           this.expressLit = true;
           this.renderer.pushToast('MYSTERY: EL EXPRESS LIT', COLOR.NEON_CYAN, 1500);
         } else {
@@ -718,7 +725,7 @@ export class Game {
         900,
       );
       this.sound.jackpot();
-      if (!this.mbSuperLit && this.mbJackpots >= MB_JACKPOTS_FOR_SUPER) {
+      if (!this.mbSuperLit && this.mbJackpots >= MB_JACKPOTS_FOR_SUPER && this.playfield.has('bean')) {
         this.mbSuperLit = true;
         this.renderer.pushToast('SUPER JACKPOT AT THE BEAN', COLOR.INSERT_RED, 1600);
         this.sound.lock();
@@ -784,12 +791,19 @@ export class Game {
         this.sound.jackpot();
         this.sound.crowd(1200, 0.2);
         this.spelledChicago = true;
+        this.renderer.playClip('chicago');
         break;
       }
       case 'skill-shot':
         this.renderer.pushToast(`SKILL SHOT +${e.points.toLocaleString()}`, COLOR.NEON_AMBER, 1200);
-        this.renderer.pushToast('SUPER SKILL AT THE BEAN', COLOR.TEXT_DIM, 1200);
-        this.superSkillMs = SUPER_SKILL_MS;
+        // Only promise the super skill on a board that HAS a Bean. This used
+        // to fire unconditionally, so a board the player had stripped in the
+        // editor told them to shoot something that was not there — and armed
+        // a timer for an award that could never be collected.
+        if (this.playfield.has('bean')) {
+          this.renderer.pushToast('SUPER SKILL AT THE BEAN', COLOR.TEXT_DIM, 1200);
+          this.superSkillMs = SUPER_SKILL_MS;
+        }
         this.sound.rollover();
         break;
       case 'lane':
@@ -1209,6 +1223,7 @@ export class Game {
       this.mbSuperLit = false;
       const released = this.playfield.releaseLocks();
       this.renderer.pushToast(`LAKE SHORE MULTIBALL × ${released}`, COLOR.NEON_AMBER, 1800);
+      this.renderer.playClip('multiball');
       this.renderer.triggerJackpotFlash();
       this.renderer.kick(5); // the release burst rocks the cabinet
       this.sound.multiball();
@@ -1727,6 +1742,7 @@ export class Game {
       initials: this.initialsChars.map((c) => INITIALS_ALPHABET[c]).join(''),
       initialsPos: this.initialsPos,
       bossLit: this.bossLit,
+      hasModeScoop: this.playfield.has('mode-scoop'),
       bossActive: this.bossActive,
       bossHp: this.bossHp,
       bossMsLeft: this.bossMsLeft,

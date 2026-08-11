@@ -5,6 +5,7 @@ import Matter from 'matter-js';
 import { Playfield } from './scene/Playfield';
 import { HudInfo, Renderer, TITLE_ROW_H, TitleRow, titleRowY } from './Renderer';
 import { Dmd } from './Dmd';
+import { CLIPS, SPORT_CLIPS } from './DmdClips';
 import { decoStar } from './Graphics';
 import { GameState, SPORTS } from './types';
 import {
@@ -233,6 +234,14 @@ export class Renderer3D {
 
   triggerJackpotFlash() {
     this.flashJackpot = 1500;
+    this.dmd.playClip(CLIPS.jackpot);
+  }
+
+  /** Play a named DMD clip. The sports modes and the jackpot ride hooks that
+   *  already existed (sportEvent, triggerJackpotFlash); this is for the two
+   *  moments that had none. */
+  playClip(id: 'multiball' | 'chicago') {
+    this.dmd.playClip(CLIPS[id]);
   }
 
   kick(amp: number) {
@@ -250,6 +259,10 @@ export class Renderer3D {
 
   sportEvent(sportIdx: number, type: 'start' | 'hit' | 'complete') {
     this.sportFx[sportIdx] = type === 'complete' ? 1600 : 900;
+    // A mode start is the one moment the display should perform. The hook
+    // was already here, carrying only a playfield light cue.
+    const sport = SPORTS[sportIdx];
+    if (type === 'start' && sport) this.dmd.playClip(SPORT_CLIPS[sport.id]);
   }
 
   /** Throw a burst of sparks from a playfield point (2D x,z + height). */
@@ -2108,6 +2121,17 @@ export class Renderer3D {
   private composeDmd(hud: HudInfo) {
     const d = this.dmd;
     d.clear();
+
+    // A running clip OWNS the panel. Squeezing an animation in beside the
+    // score line would give it 18 dots minus two lines of text, which is
+    // nothing — and a real machine takes the whole display for a mode start
+    // too. The clip runner drops itself when its duration elapses, so this
+    // needs no timer of its own.
+    if (d.clipActive()) {
+      d.drawClip();
+      return;
+    }
+
     if (hud.state === GameState.TITLE || hud.state === GameState.GAME_OVER) {
       d.centerText(hud.state === GameState.TITLE ? 'WINDY CITY SHOWDOWN' : 'GAME OVER', 1);
       const hsTag = hud.highScoreInitials ? `${hud.highScoreInitials} ` : '';
@@ -2130,6 +2154,11 @@ export class Renderer3D {
                 hud.matched ? 'MATCH!' : 'PRESS ENTER',
               ];
       d.centerText(msgs[Math.floor(performance.now() / 2200) % msgs.length], 10);
+      // Every third message slot, run the L train across the skyline instead
+      // of another line of text. Attract mode is the display's audition.
+      if (Math.floor(performance.now() / 2200) % 4 === 3 && !d.clipActive()) {
+        d.playClip(CLIPS.elTrain);
+      }
       return;
     }
     const playerTag = hud.playerScores.length > 1 ? `P${hud.currentPlayer + 1} ` : '';
@@ -2176,7 +2205,7 @@ export class Renderer3D {
         d.centerText(`TILT WARNING — ${left} LEFT`, 10);
       }
     } else if (hud.bossLit && hud.state === GameState.PLAYING) {
-      if (blink) d.centerText('SHOWDOWN AT THE SCOOP', 10);
+      if (blink) d.centerText(hud.hasModeScoop ? 'SHOWDOWN AT THE SCOOP' : 'SHOWDOWN LIT', 10);
     } else if (hud.playerScores.length > 1) {
       const strip = hud.playerScores
         .map(

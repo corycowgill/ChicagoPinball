@@ -26,7 +26,7 @@ import { ScoreEvent } from '../types';
 import { PlayfieldLayout } from '../layout/types';
 import { DEFAULT_LAYOUT } from '../layout/default';
 import { ResolvedLayout, resolveLayout } from '../layout/resolve';
-import { BuildTrace, buildPlayfield, WallDef } from '../layout/build';
+import { BuildTrace, buildPlayfield, onTable, WallDef } from '../layout/build';
 
 export interface PlayfieldEvents {
   onScore: (e: ScoreEvent) => void;
@@ -108,6 +108,41 @@ export class Playfield {
   get launchX() { return this.resolved.frame.launchX; }
   get playRight() { return this.resolved.frame.playRight; }
   get playCenter() { return this.resolved.frame.playCenter; }
+
+  /** Is this feature actually ON this board?
+   *
+   *  The layout editor can delete almost anything, and `standIns()` in
+   *  build.ts keeps that from throwing by parking the missing part four
+   *  thousand pixels off the table. That fixed the crash; it did not stop the
+   *  machine TALKING about parts that are not there. "SUPER SKILL AT THE
+   *  BEAN" fired on every skill shot, on a Bean-less board too — and armed a
+   *  timer for an award that could never be collected.
+   *
+   *  Asks the built world rather than the layout, and rather than
+   *  layout/feasible.ts, which is dev/editor-only and must not be pulled into
+   *  the player bundle. */
+  has(feature: 'bean' | 'mode-scoop' | 'lake-scoop' | 'captive' | 'spinner'): boolean {
+    switch (feature) {
+      case 'bean':
+        return onTable({ x: this.bean.cx, y: this.bean.cy });
+      case 'mode-scoop':
+        return onTable(this.cityTourScoop);
+      case 'lake-scoop':
+        return onTable(this.lakeMichiganScoop);
+      case 'captive':
+        return onTable(this.captive);
+      case 'spinner':
+        return onTable(this.spinner.body.position);
+    }
+  }
+
+  /** Does the board have a sensor in this role? Outlane features (the
+   *  kickback, the EL EXPRESS) hang off sensors rather than entities. */
+  hasSensor(role: string): boolean {
+    return [...this.resolved.layout.statics, ...this.resolved.layout.elements].some(
+      (d) => d.kind === 'sensor' && d.role === role,
+    );
+  }
 
   /** A static descriptor by id, for presentation code that must place a
    *  visual ON a physical body rather than beside it.
